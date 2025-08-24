@@ -1,0 +1,6 @@
+
+export function SearchIcon(props:any){return (<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" {...props}><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M21 21l-4.35-4.35m1.1-4.4a7.5 7.5 0 11-15 0 7.5 7.5 0 0115 0z"/></svg>)}
+export function MapPinIcon(props:any){return (<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" {...props}><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 11a4 4 0 100-8 4 4 0 000 8zm0 0c-5.333 0-8 2.667-8 8h16c0-5.333-2.667-8-8-8z"/></svg>)}
+export function CalendarIcon(props:any){return (<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" {...props}><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 7V3m8 4V3M3 11h18M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>)}
+export function ScissorsIcon(props:any){return (<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" {...props}><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M14.121 14.121L3 3m7.879 7.879L21 21M6 17a3 3 0 100-6 3 3 0 000 6zm12 0a3 3 0 100-6 3 3 0 000 6z"/></svg>)}
+export function ShopIcon(props:any){return (<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" {...props}><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M3 9l1-5h16l1 5M4 9h16v10a2 2 0 01-2 2H6a2 2 0 01-2-2V9z"/></svg>)}
