@@ -1,18 +1,50 @@
-
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
-html, body { height: 100%; background: theme('colors.ivory'); color: theme('colors.charcoal'); }
+html, body { height: 100%; }
 
 /* utility bundles */
-.container { @apply max-w-[1200px] mx-auto px-4; }
+.container { @apply max-w-[1200px] mx-auto px-4 md:px-6; }
 .card { @apply bg-white border border-border rounded-card shadow-card; }
-.input { @apply w-full bg-white border border-border rounded-card px-4 py-3 text-base text-charcoal placeholder-gray-400 outline-none focus:border-slate focus:ring-4 focus:ring-slate/20; }
-.btn { @apply inline-flex items-center justify-center gap-2 font-semibold rounded-md px-5 py-3 transition-colors duration-150 focus:outline-none focus:ring-2 focus:ring-offset-2; }
+
+/* Inputs a touch taller + better focus */
+.input { @apply w-full bg-white border border-border/70 rounded-xl px-4 py-3.5
+  text-base text-charcoal placeholder-gray-400 outline-none
+  focus:border-brown focus:ring-4 focus:ring-brown/15; }
+
+/* Buttons: crisper radius + motion */
+.btn { @apply inline-flex items-center justify-center gap-2 font-semibold
+  rounded-lg px-5 py-3 transition duration-150 active:scale-[.98]
+  focus:outline-none focus:ring-2 focus:ring-offset-2; }
 .btn-primary { @apply bg-brown text-white hover:bg-brown-dark focus:ring-brown; }
-.btn-secondary { @apply border border-brown text-brown hover:bg-[#F0E8DF] focus:ring-brown; }
-.text-muted { @apply text-muted; }
-.h1 { @apply font-semibold text-4xl md:text-5xl; }
-.h2 { @apply font-semibold text-3xl; }
-.h3 { @apply font-semibold text-2xl; }
+.btn-secondary { @apply border border-brown text-brown hover:bg-brown/5 focus:ring-brown; }
+
+.h1 { @apply font-semibold leading-tight text-[34px] md:text-[44px] lg:text-[52px]; }
+.text-muted { color: #5E6168; }
+
+/* NEW: brand treatment for TrimZi */
+.brand {
+  font-family: var(--font-brand), ui-sans-serif, system-ui;
+  font-weight: 800;
+  letter-spacing: .5px;
+}
+
+/* Safe-area padding for iOS bottom nav */
+.safe-bottom { padding-bottom: env(safe-area-inset-bottom); }
+.splash-screen {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100vh;
+  background-color: #f9f6f2; /* Ivory background */
+}
+
+.splash-screen .logo {
+  animation: fadeIn 0.8s ease-in-out;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: scale(0.9); }
+  to { opacity: 1; transform: scale(1); }
+}

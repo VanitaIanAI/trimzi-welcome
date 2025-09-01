@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="400" height="200" viewBox="0 0 400 200">
+  <style>
+    .text { font-family: Arial, sans-serif; font-size: 48px; font-weight: bold; fill: #4B2E2B; }
+    .scissors { fill: none; stroke: #4B2E2B; stroke-width: 6; stroke-linecap: round; }
+  </style>
+  <g transform="translate(200,70)">
+    <!-- Scissors above text -->
+    <line class="scissors" x1="-20" y1="0" x2="0" y2="-40"/>
+    <line class="scissors" x1="20" y1="0" x2="0" y2="-40"/>
+    <circle class="scissors" cx="-20" cy="0" r="8"/>
+    <circle class="scissors" cx="20" cy="0" r="8"/>
+  </g>
+  <text x="200" y="160" text-anchor="middle" class="text">TrimZi</text>
+</svg>
