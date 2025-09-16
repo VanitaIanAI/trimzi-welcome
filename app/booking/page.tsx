@@ -1,5 +1,6 @@
 'use client';
 import React, { useMemo, useState } from 'react';
+import { useSearchParams } from 'next/navigation';
 
 // --- Config ---
 const DAY_TABS = ['Wednesday', 'Thursday', 'Friday', 'Saturday'] as const;
@@ -35,6 +36,10 @@ function sectionize(slots: string[]) {
 }
 
 export default function BookingPage() {
+  const searchParams = useSearchParams();
+  const serviceName = searchParams.get('name');
+  const servicePrice = searchParams.get('price');
+  const serviceDuration = searchParams.get('durationMins');
   const [barber, setBarber] = useState<string>("");
   const [dayIdx, setDayIdx] = useState<number>(0); // 0 = Wednesday
   const [selectedTime, setSelectedTime] = useState<string | null>(null);
@@ -52,6 +57,15 @@ export default function BookingPage() {
   return (
     <div className="min-h-dvh bg-ivory text-brown">
       <main className="mx-auto max-w-[720px] px-4 pb-24">
+        {/* Selected service header */}
+        {serviceName && (
+          <section className="mt-4 rounded-xl bg-white border border-brown/10 p-4">
+            <h1 className="text-lg font-semibold text-brown">{serviceName}</h1>
+            <p className="text-brown/70 text-sm">
+              {servicePrice ? <>£{servicePrice}</> : null}
+            </p>
+          </section>
+        )}
         {/* Barber card + selector */}
         <section className="mt-6 rounded-2xl bg-brown/5 border border-brown/10 p-4">
           <div className="flex items-center justify-between gap-4">
