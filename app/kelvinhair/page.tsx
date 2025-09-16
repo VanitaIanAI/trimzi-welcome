@@ -6,6 +6,29 @@ export const metadata = {
   title: 'Kelvinhair – TrimZi',
 };
 
+// one source of truth for your services
+const services = [
+  {
+    id: "mens_scissor_cut",
+    name: "Men's - Scissor cut",
+    price: 22,
+    durationMins: 40,
+  },
+  {
+    id: "student_scissor_cut",
+    name: "Student - Scissor cut",
+    price: 20,
+    durationMins: 40,
+  },
+  {
+    id: "student_clipper_cut",
+    name: "Student - Clipper cut / Fade",
+    price: 18,
+    durationMins: 45,
+  }
+];
+
+
 export default function KelvinhairPage() {
   return (
     <div className="min-h-dvh bg-ivory pb-24">
@@ -52,48 +75,35 @@ export default function KelvinhairPage() {
           </div>
         </section>
 
-        {/* Services list (three items) */}
+        {/* Services list (now generated + clickable) */}
         <section className="bg-white rounded-xl border border-brown/10 divide-y divide-brown/10">
-          <div className="p-4 flex items-start justify-between gap-4">
+          {services.map((svc) => (
+            <Link
+              key={svc.id}
+              href={{
+                pathname: '/booking',
+                query: {
+                  name: svc.name,
+                  price: svc.price,
+                  durationMins: svc.durationMins,
+                }
+              }}
+          
+              className="p-4 flex items-start justify-between gap-4 hover:bg-brown/5">
             <div>
-              <h3 className="text-brown font-medium">Men – Scissor cut</h3>
-              <p className="text-brown/70 text-sm mt-1">40 mins</p>
+              <h3 className="text-brown font-medium">{svc.name}</h3>
+              <p className="text-brown/70 text-sm mt-1">{svc.durationMins} mins</p>
             </div>
             <div className="text-right">
-              <div className="text-brown font-semibold">£22</div>
-              <button className="mt-2 text-sm px-3 py-1 rounded-md bg-brown text-white hover:opacity-90">
+              <div className="text-brown font-semibold">£{svc.price}</div>
+              <div className="mt-2 text-sm px-3 py-1 rounded-md bg-brown text-white hover:opacity-90">
                 Add
-              </button>
+              </div>
             </div>
-          </div>
-
-          <div className="p-4 flex items-start justify-between gap-4">
-            <div>
-              <h3 className="text-brown font-medium">Student – Scissor cut</h3>
-              <p className="text-brown/70 text-sm mt-1">40 mins</p>
-            </div>
-            <div className="text-right">
-              <div className="text-brown font-semibold">£20</div>
-              <button className="mt-2 text-sm px-3 py-1 rounded-md bg-brown text-white hover:opacity-90">
-                Add
-              </button>
-            </div>
-          </div>
-
-          <div className="p-4 flex items-start justify-between gap-4">
-            <div>
-              <h3 className="text-brown font-medium">Student – Clipper cut / Fade</h3>
-              <p className="text-brown/70 text-sm mt-1">45 mins</p>
-            </div>
-            <div className="text-right">
-              <div className="text-brown font-semibold">£18</div>
-              <button className="mt-2 text-sm px-3 py-1 rounded-md bg-brown text-white hover:opacity-90">
-                Add
-              </button>
-            </div>
-          </div>
-        </section>
-
+          </Link>
+        ))}    
+      </section>  
+      
         <div className="px-1">
           <Link
             href="#"
