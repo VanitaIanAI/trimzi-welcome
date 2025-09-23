@@ -3,20 +3,34 @@ import { google } from 'googleapis';
 import { readFileSync } from 'fs';
 import path from 'path';
 
-const keyPath = path.join(process.cwd(), 'config', 'service-account-key.json');
-const keyFile = JSON.parse(readFileSync(keyPath, 'utf8'));
+const SCOPES = ['https://www.googleapis.com/auth/calendar'];
 
-// Use a Service Account JWT client for server-to-server
-const jwt = new google.auth.JWT({
-  email: keyFile.client_email,
-  key: keyFile.private_key,
-  scopes: ['https://www.googleapis.com/auth/calendar'],
-});
+/**
+* Use Application Default Credentials in Firebase/Cloud,
+* and fall back to the local JSON key when running locally.
+*/
+async function getAuth() {
+  // In Firebase Hosting/Functions, GCLOUD_PROJECT is set
+  if (process.env.GCLOUD_PROJECT || process.env.FUNCTIONS_EMULATOR) {
+    const auth = new google.auth.GoogleAuth({ scopes: SCOPES });
+    return await auth.getClient();
+  }
 
-export function getCalendar() {
-  const calendar = google.calendar({ version: 'v3', auth: jwt });
-  return calendar;
+  // Local dev: use the key in /config/service-account-key.json
+  const keyPath = path.join(process.cwd(), 'config', 'service-account-key.json');
+  const keyFile = JSON.parse(readFileSync(keyPath, 'utf8'));
+  return new google.auth.JWT(
+    keyFile.client_email,
+    undefined,
+    keyFile.private_key,
+    SCOPES
+  );
 }
 
-export const CALENDAR_ID = process.env.GOOGLE_CALENDAR_ID || 'primary';
+export async function getCalendar() {
+  const auth = await getAuth();
+  return google.calendar({ version: 'v3', auth });
+}
+
+export const CALENDAR_ID = process.env.GOOGLE_CALENDAR_ID || 'vanitaian24@gmail.com';
 export const TZ = process.env.TIMEZONE || 'Europe/London';
