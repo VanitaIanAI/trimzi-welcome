@@ -1,7 +1,0 @@
-{
-  "/page": "app/page.js",
-  "/onboarding/page": "app/onboarding/page.js",
-  "/home/page": "app/home/page.js",
-  "/kelvinhair/page": "app/kelvinhair/page.js",
-  "/booking/page": "app/booking/page.js"
-}

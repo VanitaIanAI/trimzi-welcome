@@ -16,7 +16,7 @@ const poppins = Poppins({
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en">
+    <html lang="en-GB">
       <body className={`${poppins.variable} min-h-screen bg-ivory text-charcoal`}>
         {children}
       </body>

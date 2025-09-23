@@ -1,5 +1,7 @@
 {
   "projects": {
     "default": "trimzi"
-  }
+  },
+  "targets": {},
+  "etags": {}
 }

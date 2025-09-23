@@ -13,6 +13,12 @@
     "moduleResolution": "bundler",
     "resolveJsonModule": true,
     "isolatedModules": true,
+    
+    "baseUrl": ".",
+    "paths": {
+      "@lib/*": ["lib/*"]
+    },
+
     "jsx": "preserve",
     "incremental": true,
     "plugins": [{ "name": "next" }]

@@ -1,10 +1,55 @@
 'use client';
-import React, { useMemo, useState } from 'react';
+export const dynamic = 'force-dynamic';
+
+import React, { useMemo, useState, Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
 
 // --- Config ---
-const DAY_TABS = ['Wednesday', 'Thursday', 'Friday', 'Saturday'] as const;
-type DayKey = typeof DAY_TABS[number];
+const OPEN_DAYS = [3, 4, 5, 6] as const; // Wed(3)-Sat(6)
+
+// Return next open date in YYYY-MM-DD (for <input type="date">)
+function nextOpenISO(from = new Date()): string {
+  const d = new Date(from);
+  while (!OPEN_DAYS.includes(d.getDay() as (typeof OPEN_DAYS)[number])) {
+    d.setDate(d.getDate() + 1);
+  }
+  return toInputDate(d);
+}  
+  //format yyy-mm-dd for the <input type="date">
+  function toInputDate(d: Date): string {
+    const yyyy = d.getFullYear();
+    const mm = String(d.getMonth() + 1).padStart(2, '0');
+    const dd = String(d.getDate()).padStart(2, '0');
+    return '${yyyy}-${mm}-${dd}';
+  }
+
+
+// UK display date dd-MM-yyyy (for labels/alerts)
+function formatUK(iso: string): string {
+  const d = new Date(iso);
+  
+  const day = d.getDate();
+  const suffix =
+    day % 10 === 1 && day !== 11
+      ? "st"
+      : day % 10 === 2 && day !== 12
+      ? "nd"
+      :day % 10 === 3 && day !== 13
+      ? "rd"
+      : "th";
+
+  const weekday = d.toLocaleDateString("en-GB", { weekday: "long" });
+  const month = d.toLocaleDateString("en-GB", { month: "long" });
+  const year = d.getFullYear();
+
+  return `${weekday}, ${day}${suffix} ${month} ${year}`;
+}
+
+// Human weekday name for a given ISO date
+function weekdayLabel(iso: string): 'Wednesday' | 'Thursday' | 'Friday' | 'Saturday' | 'Sunday' | 'Monday' | 'Tuesday' {
+  const d = new Date(iso);
+  return ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'][d.getDay()] as any;
+}
 
 const BARBERS = ['Ian'] as const;
 
@@ -35,14 +80,25 @@ function sectionize(slots: string[]) {
   };
 }
 
-export default function BookingPage() {
+// Build an ISO timestamp from "YYYY-MM-DD" + "HH:mm"
+function toISO(dateStr: string, timeStr: string): string {
+  const [h, m] = timeStr.split(':').map(Number);
+  const d = new Date(`${dateStr}T00:00:00`);
+  d.setHours(h, m, 0, 0);
+  return d.toISOString();
+}
+
+function BookingContent() {
   const searchParams = useSearchParams();
   const serviceName = searchParams.get('name');
   const servicePrice = searchParams.get('price');
+  const [selectedDate, setSelectedDate] = useState(nextOpenISO());
+  const dayIdx = useMemo(() => new Date(selectedDate).getDay(), [selectedDate]);
   const serviceDuration = searchParams.get('durationMins');
   const [barber, setBarber] = useState<string>("");
-  const [dayIdx, setDayIdx] = useState<number>(0); // 0 = Wednesday
   const [selectedTime, setSelectedTime] = useState<string | null>(null);
+  const [pending, setPending] = useState(false);
+  const durationMins = Number(serviceDuration ?? 30); //fallback if query param missing
 
   // Start time differs for Saturday
   const slots = useMemo(() => {
@@ -53,6 +109,49 @@ export default function BookingPage() {
   }, [dayIdx]);
 
   const sections = useMemo(() => sectionize(slots), [slots]);
+
+async function handleBook() {
+  if (!selectedDate || !selectedTime) {
+    alert('Please choose a date and a time first.');
+    return;
+  }
+
+  setPending(true);
+  try {
+    // Build start/end ISO strings
+    const startISO = toISO(selectedDate, selectedTime);
+    const end = new Date(startISO);
+    end.setMinutes(end.getMinutes() + durationMins);
+    const endISO = end.toISOString();
+
+    // POST to our API route
+    const res = await fetch('/api/bookings', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        summary: serviceName ?? 'Trimzi Booking',
+        description: `Booked via Trimzi — Barber: ${barber || 'Ian'}`,
+        startISO,
+        endISO,
+        attendeeEmail: null,  // add a real email later if you want
+        barberName: barber || 'Ian',
+      }),
+    });
+
+    const json = await res.json();
+    if (!res.ok || !json.ok) {
+      throw new Error(json.message || 'Booking failed');
+    }
+
+    alert(`Booked! ${json.htmlLink ? 'Open in Google Calendar: ' + json.htmlLink : ''}`);
+  } catch (err: any) {
+    console.error(err);
+    alert(`Error: ${err.message ?? err}`);
+  } finally {
+    setPending(false);
+  }
+}
+
 
   return (
     <div className="min-h-dvh bg-ivory text-brown">
@@ -66,6 +165,34 @@ export default function BookingPage() {
             </p>
           </section>
         )}
+        {/* Date picker */}
+        <section className="mt-6 rounded-2x1 bg-brown/5 border border-brown/10 p-4">
+          <label className="text-sm block">
+            <span className="sr-only">Choose date</span>
+            
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-xs text-brown/60">Date</p>
+                <p className="font-semibold text-brown">{formatUK(selectedDate)}
+                </p>
+              </div>
+              
+              <input
+                lang="en-GB"
+                type="date"
+                value={selectedDate}
+                min={nextOpenISO()} // today or next open day
+                onChange={(e) => setSelectedDate(e.target.value)}
+                className="rounded-md border border-brown/20 bg-white px-3 py-2 text-sm"
+              />  
+            </div>
+            
+            {!OPEN_DAYS.includes(new Date(selectedDate).getDay() as (typeof OPEN_DAYS)[number]) && (
+              <p className="mt-2 text-xs text-red-700">We're closed on this day. Please choose Wed-Sat.
+              </p>
+            )}
+          </label>
+        </section>
         {/* Barber card + selector */}
         <section className="mt-6 rounded-2xl bg-brown/5 border border-brown/10 p-4">
           <div className="flex items-center justify-between gap-4">
@@ -98,24 +225,13 @@ export default function BookingPage() {
           </div>
         </section>
 
-        {/* Day tabs (English-only labels to avoid hydration issues) */}
-        <nav className="mt-6 border-b border-brown/10">
-          <ul className="flex gap-6">
-            {DAY_TABS.map((label, i) => (
-              <li key={label}>
-                <button
-                  type="button"
-                  onClick={() => setDayIdx(i)}
-                  className={`pb-3 text-brown/70 hover:text-brown transition-colors ${
-                    dayIdx === i ? 'border-b-2 border-brown text-brown font-medium' : ''
-                  }`}
-                >
-                  {label}
-                </button>
-              </li>
-            ))}
-          </ul>
-        </nav>
+        {/* Closed day message */}
+        {!OPEN_DAYS.includes(dayIdx as any) ? (
+          <p className="mt-6 text-brown/70 text-sm">No slots: we're closed on {weekdayLabel(selectedDate)}.</p>
+        ) : (
+          <>
+        
+
 
         {/* Sections */}
         {(['Morning','Midday / Afternoon','Afternoon / Evening'] as const).map((section) => {
@@ -146,23 +262,38 @@ export default function BookingPage() {
             </section>
           );
         })}
+        </>
+        )}
+
 
         {/* Continue */}
         <div className="mt-8">
           <button
             type="button"
-            disabled={!barber || !selectedTime}
+            disabled={pending || !barber || !selectedTime || !OPEN_DAYS.includes(dayIdx as any)}
+            onClick={handleBook}
             className={`w-full rounded-2xl px-5 py-4 text-center font-semibold transition
-              ${selectedTime
+              ${pending || !barber || selectedTime || !OPEN_DAYS.includes(dayIdx as any)
                 ? 'bg-brown text-ivory hover:bg-brown/90'
                 : 'bg-brown/20 text-brown/50 cursor-not-allowed'}`}
-            onClick={() => alert(`Booked ${barber} on ${DAY_TABS[dayIdx]} at ${selectedTime}`)}
+            
           >
-            Continue
+            {pending ? 'Booking...' : 'Continue'}
           </button>
          
         </div>
       </main>
     </div>
+  );
+}
+export default function BookingPage() {
+  return (
+    <Suspense fallback={
+      <main className="mx-auto max-w-[720px] px-4 py-6">
+        <p className="text-brown/70 text-sm">Loading..</p>
+      </main>
+    }>
+      <BookingContent />
+    </Suspense>
   );
 }
