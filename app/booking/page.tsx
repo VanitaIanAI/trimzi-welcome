@@ -20,7 +20,7 @@ function nextOpenISO(from = new Date()): string {
     const yyyy = d.getFullYear();
     const mm = String(d.getMonth() + 1).padStart(2, '0');
     const dd = String(d.getDate()).padStart(2, '0');
-    return '${yyyy}-${mm}-${dd}';
+    return `${yyyy}-${mm}-${dd}`;
   }
 
 
@@ -92,7 +92,7 @@ function BookingContent() {
   const searchParams = useSearchParams();
   const serviceName = searchParams.get('name');
   const servicePrice = searchParams.get('price');
-  const [selectedDate, setSelectedDate] = useState(nextOpenISO());
+  const [selectedDate, setSelectedDate] = useState(toInputDate(new Date()));
   const dayIdx = useMemo(() => new Date(selectedDate).getDay(), [selectedDate]);
   const serviceDuration = searchParams.get('durationMins');
   const [barber, setBarber] = useState<string>("");
@@ -102,7 +102,7 @@ function BookingContent() {
 
   // Start time differs for Saturday
   const slots = useMemo(() => {
-    const isSaturday = dayIdx === 3;
+    const isSaturday = dayIdx === 6;
     const [sh, sm] = isSaturday ? [9, 0] : [9, 30];   // Sat 09:00, Wed-Fri 09:30
     const [eh, em] = isSaturday ? [17, 15] : [19, 15];                        // Sat 17:15, else 19:15
     return buildSlots(sh, sm, eh, em);
@@ -181,7 +181,7 @@ async function handleBook() {
                 lang="en-GB"
                 type="date"
                 value={selectedDate}
-                min={nextOpenISO()} // today or next open day
+                min={toInputDate(new Date())} // today or next open day
                 onChange={(e) => setSelectedDate(e.target.value)}
                 className="rounded-md border border-brown/20 bg-white px-3 py-2 text-sm"
               />  

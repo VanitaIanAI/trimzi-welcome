@@ -24,7 +24,7 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: 'summary, startISO and endISO are required' }, { status: 400 });
     }
 
-    const calendar = getCalendar();
+    const calendar = await getCalendar();
 
     const event = {
       summary,

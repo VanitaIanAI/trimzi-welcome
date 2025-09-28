@@ -10,26 +10,33 @@ const SCOPES = ['https://www.googleapis.com/auth/calendar'];
 * and fall back to the local JSON key when running locally.
 */
 async function getAuth() {
-  // In Firebase Hosting/Functions, GCLOUD_PROJECT is set
+  // In Firebase/Cloud: use Application default Credentials (no JSON file needed)
   if (process.env.GCLOUD_PROJECT || process.env.FUNCTIONS_EMULATOR) {
     const auth = new google.auth.GoogleAuth({ scopes: SCOPES });
     return await auth.getClient();
+   
   }
 
-  // Local dev: use the key in /config/service-account-key.json
+  // Local dev: load the downloaded service account JSON from /config
   const keyPath = path.join(process.cwd(), 'config', 'service-account-key.json');
-  const keyFile = JSON.parse(readFileSync(keyPath, 'utf8'));
-  return new google.auth.JWT(
-    keyFile.client_email,
-    undefined,
-    keyFile.private_key,
-    SCOPES
-  );
-}
+  const { client_email, private_key } = JSON.parse(readFileSync(keyPath, 'utf8'));
+  
+  return new google.auth.JWT({
+    email: client_email,
+    key: private_key,
+    scopes: SCOPES,
+    
+});
+}  
+
 
 export async function getCalendar() {
   const auth = await getAuth();
-  return google.calendar({ version: 'v3', auth });
+  return google.calendar({ 
+    version: 'v3', 
+    auth: auth as any,
+
+   });
 }
 
 export const CALENDAR_ID = process.env.GOOGLE_CALENDAR_ID || 'vanitaian24@gmail.com';

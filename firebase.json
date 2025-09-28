@@ -1,6 +1,7 @@
 {
   "hosting": {
+    "site": "trimzi",
     "source": ".",
-    "frameworksBackend": {}
+    "frameworksBackend": { "region": "europe-west2" }
   }
 }
