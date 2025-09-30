@@ -2,4 +2,6 @@ node_modules
 .env.local
 /config/service-account-key.json
 .next
-.next/
+.next/env.local
+.env*
+config/service-account-key.json
