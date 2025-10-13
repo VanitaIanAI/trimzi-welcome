@@ -4,15 +4,26 @@
 import Image from 'next/image';
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
-import { onAuthStateChanged, type User } from 'firebase/auth';
+import { onAuthStateChanged, signOut, type User } from 'firebase/auth';
 import { doc, getDoc } from 'firebase/firestore';
-import { auth, db } from '../../lib/firebaseClient';
+import { auth, db } from '../../../lib/firebaseClient';
 
 export default function HomePage() {
   const [tab, setTab] = useState<'services' | 'salon'>('services');
   const [user, setUser] = useState<User | null>(null);
   const [profileName, setProfileName] = useState<string | null>(null);
   const [authReady, setAuthReady] = useState(false);
+
+  // Simple sign-out handler
+  const handleSignOut = async () => {
+    try {
+      await signOut(auth);
+      window.location.href = '/onboarding'; // redirect to on boarding
+
+    } catch (err) {
+      console.error('Sign-out failed:', err);
+    }
+  };
 
   // Track auth state
   useEffect(() => {
@@ -59,9 +70,17 @@ export default function HomePage() {
             {!authReady ? (
               <span className="text-sm text-brown/60">Checking...</span>
             ) : user && greetingName ? (
+              <div className="flex items-center gap-3">
               <span className="text-sm text-brown/80">
                 Welcome back, <strong>{greetingName}</strong>
               </span>
+              <button
+                onClick={handleSignOut}
+                className="text-sm text-brown border border-brown px-3 py-1 rounded-md hover:bg-brown/5"
+              >
+                Sign out
+              </button>  
+              </div>
             ) : (
               <Link
                 href="/onboarding"

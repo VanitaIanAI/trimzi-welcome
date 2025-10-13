@@ -42,12 +42,17 @@ export default function Onboarding() {
   const [pending, setPending] = useState(false);
   const disabled = pending;
 
+  // DEV: pause auto-redirect while testing (set to false when done)
+  const DEV_NO_AUTO_REDIRECT = true;
+
   // Consume Google redirect result *and* wait for Auth to be ready
 React.useEffect(() => {
   const unsub = onAuthStateChanged(auth, async (u) => {
     try {
       if (u) {
-        // Already signed in (popup or redirect finished)
+        // In dev mode, do not auto-redirect when a user is already signed in
+        if (DEV_NO_AUTO_REDIRECT) return;
+
         await ensureProfile(u.uid, {
           name: u.displayName ?? '',
           email: u.email ?? '',
@@ -59,6 +64,9 @@ React.useEffect(() => {
       // If not signed in yet, check if a redirect just completed
       const cred = await getRedirectResult(auth);
       if (cred?.user) {
+        // In dev mode, do not auto-redirect after redirect-based sign-in
+        if (DEV_NO_AUTO_REDIRECT) return;
+        
         await ensureProfile(cred.user.uid, {
           name: cred.user.displayName ?? '',
           email: cred.user.email ?? '',
