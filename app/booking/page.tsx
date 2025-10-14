@@ -3,6 +3,10 @@ export const dynamic = 'force-dynamic';
 
 import React, { useMemo, useState, Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
+import { auth, db } from '../../lib/firebaseClient';
+import { setDoc, doc, serverTimestamp } from 'firebase/firestore';
+import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 
 // --- Config ---
 const OPEN_DAYS = [3, 4, 5, 6] as const; // Wed(3)-Sat(6)
@@ -99,6 +103,18 @@ function BookingContent() {
   const [selectedTime, setSelectedTime] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
   const durationMins = Number(serviceDuration ?? 30); //fallback if query param missing
+  const isDisabled = pending || !barber || !selectedTime || !OPEN_DAYS.includes(dayIdx as any);
+  const router = useRouter();
+
+const [showConfirm, setShowConfirm] = useState(false);
+const [confirm, setConfirm] = useState<{
+  service: string;
+  dateLabel: string;
+  timeLabel: string;
+  barber: string;
+  htmlLink?: string | null;
+} | null>(null);
+
 
   // Start time differs for Saturday
   const slots = useMemo(() => {
@@ -110,6 +126,11 @@ function BookingContent() {
 
   const sections = useMemo(() => sectionize(slots), [slots]);
 
+  const randId = () =>
+  (typeof crypto !== 'undefined' && 'randomUUID' in crypto)
+    ? crypto.randomUUID()
+    : Math.random().toString(36).slice(2);
+  
 async function handleBook() {
   if (!selectedDate || !selectedTime) {
     alert('Please choose a date and a time first.');
@@ -143,7 +164,44 @@ async function handleBook() {
       throw new Error(json.message || 'Booking failed');
     }
 
-    alert(`Booked! ${json.htmlLink ? 'Open in Google Calendar: ' + json.htmlLink : ''}`);
+     try {
+  const u = auth.currentUser;
+  if (!u || u.isAnonymous) {
+    console.warn('Guest booking: not saving to Firestore.');
+  } else {
+    const bookingId = json.bookingId ?? json.eventId ?? randId();
+
+    await setDoc(
+      doc(db, 'users', u.uid, 'bookings', bookingId),
+      {
+        userId: u.uid,
+        serviceName: serviceName ?? 'Trimzi Booking',
+        barberName: barber || 'Ian',
+        startISO,
+        endISO,
+        durationMins,
+        price: servicePrice ? Number(servicePrice) : null,
+        source: 'web',
+        status: 'upcoming',
+        htmlLink: json.htmlLink ?? null,   // ← add this
+        createdAt: serverTimestamp(),
+      },
+      { merge: true } // safe to re-run
+    );
+  }
+} catch (e) {
+  console.warn('Saved booking to Firestore failed:', e);
+}
+
+setConfirm({
+  service: serviceName ?? 'Trimzi Booking',
+  dateLabel: formatUK(selectedDate),
+  timeLabel: selectedTime!,           // safe because we gate with isDisabled
+  barber: barber || 'Ian',
+  htmlLink: json.htmlLink ?? null,
+});
+setShowConfirm(true);
+
   } catch (err: any) {
     console.error(err);
     alert(`Error: ${err.message ?? err}`);
@@ -155,6 +213,20 @@ async function handleBook() {
 
   return (
     <div className="min-h-dvh bg-ivory text-brown">
+       {/* Top app bar */}
+    <header className="sticky top-0 z-20 bg-white/90 backdrop-blur border-b border-brown/10">
+      <div className="mx-auto max-w-[720px] h-14 px-4 flex items-center justify-between">
+        <h1 className="brand text-brown text-xl font-bold">TrimZi</h1>
+        <Link
+          href="/kelvinhair"
+          className="text-sm text-brown border border-brown px-3 py-1 rounded-md hover:bg-brown/5"
+        >
+          Back
+        </Link>
+      </div>
+    </header>
+
+      
       <main className="mx-auto max-w-[720px] px-4 pb-24">
         {/* Selected service header */}
         {serviceName && (
@@ -268,20 +340,91 @@ async function handleBook() {
 
         {/* Continue */}
         <div className="mt-8">
+
+        
           <button
             type="button"
-            disabled={pending || !barber || !selectedTime || !OPEN_DAYS.includes(dayIdx as any)}
+            disabled={isDisabled}
             onClick={handleBook}
             className={`w-full rounded-2xl px-5 py-4 text-center font-semibold transition
-              ${pending || !barber || selectedTime || !OPEN_DAYS.includes(dayIdx as any)
-                ? 'bg-brown text-ivory hover:bg-brown/90'
-                : 'bg-brown/20 text-brown/50 cursor-not-allowed'}`}
+              ${isDisabled
+                ? 'bg-brown/20 text-brown/50 cursor-not-allowed'
+                : 'bg-brown text-ivory hover:bg-brown/90'}`}
             
           >
             {pending ? 'Booking...' : 'Continue'}
           </button>
          
         </div>
+        
+        {showConfirm && confirm && (
+  <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center">
+    {/* backdrop */}
+    <div
+      className="absolute inset-0 bg-black/40"
+      onClick={() => setShowConfirm(false)}
+    />
+
+    {/* sheet / modal */}
+    <div className="relative w-full sm:max-w-md bg-white rounded-t-2xl sm:rounded-2xl shadow-xl border border-brown/10 p-5 mx-auto">
+      <h2 className="text-brown text-lg font-semibold mb-1">
+        Booking confirmed 🎉
+      </h2>
+      <p className="text-brown/80 text-sm mb-4">
+        You’ll receive an email shortly with your booking details.
+      </p>
+
+      <div className="space-y-2 text-sm">
+        <div className="flex justify-between">
+          <span className="text-brown/70">Service</span>
+          <span className="font-medium text-brown">{confirm.service}</span>
+        </div>
+        <div className="flex justify-between">
+          <span className="text-brown/70">Date</span>
+          <span className="font-medium text-brown">{confirm.dateLabel}</span>
+        </div>
+        <div className="flex justify-between">
+          <span className="text-brown/70">Time</span>
+          <span className="font-medium text-brown">{confirm.timeLabel}</span>
+        </div>
+        <div className="flex justify-between">
+          <span className="text-brown/70">Barber</span>
+          <span className="font-medium text-brown">{confirm.barber}</span>
+        </div>
+
+        {confirm.htmlLink ? (
+          <p className="pt-2 text-xs">
+            <a
+              href={confirm.htmlLink}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-brown hover:underline"
+            >
+              View in calendar
+            </a>
+          </p>
+        ) : null}
+      </div>
+
+      <div className="mt-5 flex gap-3">
+        <button
+          type="button"
+          className="flex-1 h-12 rounded-xl bg-brown text-white font-semibold hover:bg-brown/90"
+          onClick={() => {
+            setShowConfirm(false);
+          
+            router.push('/home');
+          }}
+        >
+          Back to Home
+        </button>
+
+      
+      </div>
+    </div>
+  </div>
+)}
+
       </main>
     </div>
   );
