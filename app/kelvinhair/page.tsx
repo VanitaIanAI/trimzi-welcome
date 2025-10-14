@@ -75,7 +75,7 @@ export default function KelvinhairPage() {
       <header className="sticky top-0 z-20 bg-white/90 backdrop-blur border-b border-brown/10">
         <div className="mx-auto max-w-[720px] h-14 px-4 flex items-center justify-between">
           <h1 className="brand text-brown text-xl font-bold">TrimZi</h1>
-          <Link href="/onboarding" className="text-sm text-brown border border-brown px-3 py-1 rounded-md hover:bg-brown/5">
+          <Link href="/home" className="text-sm text-brown border border-brown px-3 py-1 rounded-md hover:bg-brown/5">
             Back
           </Link>
         </div>
