@@ -18,7 +18,7 @@ export async function POST(req: Request) {
     //   barberName?: "Ian"
     // }
 
-    const { summary, description, startISO, endISO, attendeeEmail, barberName } = body;
+    const { summary, description, startISO, endISO, attendeeEmail, barberName, customerName, customerPhone } = body;
 
     if (!summary || !startISO || !endISO) {
       return NextResponse.json({ error: 'summary, startISO and endISO are required' }, { status: 400 });
@@ -26,16 +26,29 @@ export async function POST(req: Request) {
 
     const calendar = await getCalendar();
 
-    const event = {
-      summary,
-      description: description ?? `Booked via Trimzi${barberName ? ` · Barber: ${barberName}` : ''}`,
-      start: { dateTime: startISO, timeZone: TZ },
-      end: { dateTime: endISO, timeZone: TZ },
-      attendees: attendeeEmail ? [{ email: attendeeEmail }] : undefined,
-      reminders: {
-        useDefault: true,
-      },
-    };
+    const prettyDesc = [
+  description ?? `Booked via Trimzi${barberName ? ` · Barber: ${barberName}` : ''}`,
+  '',
+  customerName ? `Customer: ${customerName}` : null,
+  customerPhone ? `Phone: ${customerPhone}` : null,
+  summary ? `Service: ${summary}` : null,
+].filter(Boolean).join('\n');
+
+const event = {
+  summary: customerName ? `${summary} — ${customerName}` : summary,
+  description: prettyDesc,
+  start: { dateTime: startISO, timeZone: TZ },
+  end: { dateTime: endISO, timeZone: TZ },
+  attendees: attendeeEmail ? [{ email: attendeeEmail }] : undefined,
+  reminders: { useDefault: true },
+  // Keep phone/name searchable but out of the title:
+  extendedProperties: {
+    private: {
+      customerName: customerName || '',
+      customerPhone: customerPhone || '',
+    },
+  },
+};
 
     const res = await calendar.events.insert({
       calendarId: CALENDAR_ID,

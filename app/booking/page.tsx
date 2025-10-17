@@ -4,9 +4,10 @@ export const dynamic = 'force-dynamic';
 import React, { useMemo, useState, Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { auth, db } from '../../lib/firebaseClient';
-import { setDoc, doc, serverTimestamp } from 'firebase/firestore';
+import { setDoc, doc, serverTimestamp, getDoc } from 'firebase/firestore';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
+import { customsearch } from 'googleapis/build/src/apis/customsearch';
 
 // --- Config ---
 const OPEN_DAYS = [3, 4, 5, 6] as const; // Wed(3)-Sat(6)
@@ -131,6 +132,31 @@ const [confirm, setConfirm] = useState<{
     ? crypto.randomUUID()
     : Math.random().toString(36).slice(2);
   
+async function getCustomerDetails() {
+  const u = auth.currentUser;
+  if (!u || u.isAnonymous) {
+    return { customerName: '', customerPhone: '' };
+  }
+
+  // name: prefer displayName, else profile.name
+  let customerName = u.displayName || '';
+
+  // phone from profiles/{uid}.phone
+  let customerPhone = '';
+  try {
+    const snap = await getDoc(doc(db, 'profiles', u.uid));
+    if (snap.exists()) {
+      const p = snap.data() as any;
+      if (!customerName) customerName = (p.name || '').trim();
+      customerPhone = (p.phone || '').trim();
+    }
+  } catch {
+    // ignore read errors; fall back to blanks
+  }
+
+  return { customerName, customerPhone };
+}
+
 async function handleBook() {
   if (!selectedDate || !selectedTime) {
     alert('Please choose a date and a time first.');
@@ -146,6 +172,7 @@ async function handleBook() {
     const endISO = end.toISOString();
 
     // POST to our API route
+    const { customerName, customerPhone } = await getCustomerDetails();
     const res = await fetch('/api/bookings', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -156,6 +183,9 @@ async function handleBook() {
         endISO,
         attendeeEmail: null,  // add a real email later if you want
         barberName: barber || 'Ian',
+        // NEW:
+        customerName,
+        customerPhone,
       }),
     });
 
