@@ -1,7 +1,7 @@
 'use client';
 export const dynamic = 'force-dynamic';
 
-import React, { useMemo, useState, Suspense } from 'react';
+import React, { useMemo, useState, useEffect, Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { auth, db } from '../../lib/firebaseClient';
 import { setDoc, doc, serverTimestamp, getDoc } from 'firebase/firestore';
@@ -116,6 +116,11 @@ const [confirm, setConfirm] = useState<{
   htmlLink?: string | null;
 } | null>(null);
 
+// availability + hold state
+const [available, setAvailable] = useState<string[]>([]);
+const [holdId, setHoldId] = useState<string | null>(null);
+const [holdExpiry,setHoldExpiry] = useState<number | null>(null);
+
 
   // Start time differs for Saturday
   const slots = useMemo(() => {
@@ -126,6 +131,44 @@ const [confirm, setConfirm] = useState<{
   }, [dayIdx]);
 
   const sections = useMemo(() => sectionize(slots), [slots]);
+
+// 🆕 Fetch availability & manage holds when date/barber changes
+useEffect(() => {
+  // If user changes date/barber, clear current selection and release any hold
+  setSelectedTime(null);
+
+  const release = async () => {
+    if (holdId) {
+      try {
+        await fetch(`/api/holds?holdId=${encodeURIComponent(holdId)}`, { method: 'DELETE' });
+      } catch {}
+      setHoldId(null);
+      setHoldExpiry(null);
+    }
+  };
+
+  const fetchAvail = async () => {
+    if (!OPEN_DAYS.includes(dayIdx as any) || !barber) {
+      setAvailable([]);
+      return;
+    }
+    const barberParam = barber.charAt(0).toUpperCase() + barber.slice(1).toLowerCase();
+    const res = await fetch(`/api/availability?date=${selectedDate}&barber=${encodeURIComponent(barberParam)}`);
+    const json = await res.json();
+    setAvailable(json.available || []);
+  };
+
+  release().finally(fetchAvail);
+}, [selectedDate, barber, dayIdx]); // re-run whenever these change
+
+useEffect(() => {
+  // cleanup when component unmounts or holdId changes next time
+  return () => {
+    if (holdId) {
+      fetch(`/api/holds?holdId=${encodeURIComponent(holdId)}`, { method: 'DELETE' }).catch(() => {});
+    }
+  };
+}, [holdId]);
 
   const randId = () =>
   (typeof crypto !== 'undefined' && 'randomUUID' in crypto)
@@ -179,13 +222,14 @@ async function handleBook() {
       body: JSON.stringify({
         summary: serviceName ?? 'Trimzi Booking',
         description: `Booked via Trimzi — Barber: ${barber || 'Ian'}`,
-        startISO,
-        endISO,
+        startISO, // server will force +45m; endISO from client is ignored
         attendeeEmail: null,  // add a real email later if you want
         barberName: barber || 'Ian',
         // NEW:
         customerName,
         customerPhone,
+        date: selectedDate,
+        holdId: holdId || null,
       }),
     });
 
@@ -344,22 +388,62 @@ setShowConfirm(true);
               <h3 className="mb-3 text-brown font-semibold">{section}</h3>
               <div className="grid grid-cols-4 gap-3 sm:grid-cols-6">
                 {list.map((t) => {
-                  const active = selectedTime === t;
-                  return (
-                    <button
-                      key={t}
-                      type="button"
-                      onClick={() => setSelectedTime(t)}
-                      className={`rounded-xl border px-3 py-2 text-sm transition
-                        ${active
-                          ? 'bg-brown text-ivory border-brown'
-                          : 'bg-white border-brown/20 text-brown hover:border-brown/40'
-                        }`}
-                    >
-                      {t}
-                    </button>
-                  );
-                })}
+  const active = selectedTime === t;
+  const isValid = available.includes(t); // only these can fit a 45-min booking
+
+  return (
+    <button
+      key={t}
+      type="button"
+      disabled={!isValid || pending}
+      onClick={async () => {
+        if (!isValid) return;
+
+        // release previous hold (if any)
+        if (holdId) {
+          try { await fetch(`/api/holds?holdId=${encodeURIComponent(holdId)}`, { method: 'DELETE' }); } catch {}
+          setHoldId(null);
+          setHoldExpiry(null);
+        }
+
+        setSelectedTime(t);
+
+        try {
+          const res = await fetch('/api/holds', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ date: selectedDate, time: t, barber }),
+          });
+          const json = await res.json();
+          if (!res.ok || !json.ok) {
+            alert(json.reason || 'That slot just went unavailable.');
+            // refresh availability
+            const r2 = await fetch(`/api/availability?date=${selectedDate}&barber=${encodeURIComponent(barber)}`);
+            const j2 = await r2.json();
+            setAvailable(j2.available || []);
+            setSelectedTime(null);
+            return;
+          }
+          setHoldId(json.holdId);
+          setHoldExpiry(Date.parse(json.expiresAt)); // for a countdown if you want
+        } catch (e) {
+          console.error(e);
+          alert('Could not reserve the slot. Please try again.');
+          setSelectedTime(null);
+        }
+      }}
+      className={`rounded-xl border px-3 py-2 text-sm transition
+        ${!isValid
+          ? 'bg-white border-brown/10 text-brown/30 cursor-not-allowed'
+          : active
+            ? 'bg-brown text-ivory border-brown'
+            : 'bg-white border-brown/20 text-brown hover:border-brown/40'
+        }`}
+    >
+      {t}
+    </button>
+  );
+})}
               </div>
             </section>
           );
@@ -371,7 +455,12 @@ setShowConfirm(true);
         {/* Continue */}
         <div className="mt-8">
 
-        
+          {holdExpiry && selectedTime ? (
+  <p className="mt-2 text-xs text-brown/70">
+    This time is reserved for ~2 minutes while you complete your booking.
+  </p>
+) : null}
+
           <button
             type="button"
             disabled={isDisabled}
@@ -407,25 +496,25 @@ setShowConfirm(true);
       <div className="space-y-2 text-sm">
         <div className="flex justify-between">
           <span className="text-brown/70">Service</span>
-          <span className="font-medium text-brown">{confirm.service}</span>
+          <span className="font-medium text-brown">{confirm!.service}</span>
         </div>
         <div className="flex justify-between">
           <span className="text-brown/70">Date</span>
-          <span className="font-medium text-brown">{confirm.dateLabel}</span>
+          <span className="font-medium text-brown">{confirm!.dateLabel}</span>
         </div>
         <div className="flex justify-between">
           <span className="text-brown/70">Time</span>
-          <span className="font-medium text-brown">{confirm.timeLabel}</span>
+          <span className="font-medium text-brown">{confirm!.timeLabel}</span>
         </div>
         <div className="flex justify-between">
           <span className="text-brown/70">Barber</span>
-          <span className="font-medium text-brown">{confirm.barber}</span>
+          <span className="font-medium text-brown">{confirm!.barber}</span>
         </div>
 
-        {confirm.htmlLink ? (
+        {confirm!.htmlLink ? (
           <p className="pt-2 text-xs">
             <a
-              href={confirm.htmlLink}
+              href={confirm!.htmlLink ?? undefined}
               target="_blank"
               rel="noopener noreferrer"
               className="text-brown hover:underline"
