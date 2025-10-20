@@ -121,6 +121,12 @@ const [available, setAvailable] = useState<string[]>([]);
 const [holdId, setHoldId] = useState<string | null>(null);
 const [holdExpiry,setHoldExpiry] = useState<number | null>(null);
 
+// --- Contact details modal state (for users without phone) ---
+const [showContactModal, setShowContactModal] = useState(false);
+const [contactName, setContactName] = useState('');
+const [contactPhone, setContactPhone] = useState('');
+const [savingContact, setSavingContact] = useState(false);
+
 
   // Start time differs for Saturday
   const slots = useMemo(() => {
@@ -200,32 +206,26 @@ async function getCustomerDetails() {
   return { customerName, customerPhone };
 }
 
-async function handleBook() {
-  if (!selectedDate || !selectedTime) {
-    alert('Please choose a date and a time first.');
-    return;
-  }
-
+async function submitBookingWith(customerName: string, customerPhone: string) {
   setPending(true);
   try {
-    // Build start/end ISO strings
+    // Build start/end ISO strings (your booking is always 45m – we keep your current derivation)
+    if (!selectedTime) throw new Error('No time selected');
     const startISO = toISO(selectedDate, selectedTime);
     const end = new Date(startISO);
     end.setMinutes(end.getMinutes() + durationMins);
     const endISO = end.toISOString();
 
-    // POST to our API route
-    const { customerName, customerPhone } = await getCustomerDetails();
+    // POST to your API route
     const res = await fetch('/api/bookings', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         summary: serviceName ?? 'Trimzi Booking',
         description: `Booked via Trimzi — Barber: ${barber || 'Ian'}`,
-        startISO, // server will force +45m; endISO from client is ignored
-        attendeeEmail: null,  // add a real email later if you want
+        startISO,                     // server still enforces 45m
+        attendeeEmail: null,
         barberName: barber || 'Ian',
-        // NEW:
         customerName,
         customerPhone,
         date: selectedDate,
@@ -238,44 +238,44 @@ async function handleBook() {
       throw new Error(json.message || 'Booking failed');
     }
 
-     try {
-  const u = auth.currentUser;
-  if (!u || u.isAnonymous) {
-    console.warn('Guest booking: not saving to Firestore.');
-  } else {
-    const bookingId = json.bookingId ?? json.eventId ?? randId();
+    // Save a copy to user’s bookings if signed in (your existing logic unchanged)
+    try {
+      const u = auth.currentUser;
+      if (!u || u.isAnonymous) {
+        console.warn('Guest booking: not saving to Firestore.');
+      } else {
+        const bookingId = json.bookingId ?? json.eventId ?? randId();
+        await setDoc(
+          doc(db, 'users', u.uid, 'bookings', bookingId),
+          {
+            userId: u.uid,
+            serviceName: serviceName ?? 'Trimzi Booking',
+            barberName: barber || 'Ian',
+            startISO,
+            endISO,
+            durationMins,
+            price: servicePrice ? Number(servicePrice) : null,
+            source: 'web',
+            status: 'upcoming',
+            htmlLink: json.htmlLink ?? null,
+            createdAt: serverTimestamp(),
+          },
+          { merge: true }
+        );
+      }
+    } catch (e) {
+      console.warn('Saved booking to Firestore failed:', e);
+    }
 
-    await setDoc(
-      doc(db, 'users', u.uid, 'bookings', bookingId),
-      {
-        userId: u.uid,
-        serviceName: serviceName ?? 'Trimzi Booking',
-        barberName: barber || 'Ian',
-        startISO,
-        endISO,
-        durationMins,
-        price: servicePrice ? Number(servicePrice) : null,
-        source: 'web',
-        status: 'upcoming',
-        htmlLink: json.htmlLink ?? null,   // ← add this
-        createdAt: serverTimestamp(),
-      },
-      { merge: true } // safe to re-run
-    );
-  }
-} catch (e) {
-  console.warn('Saved booking to Firestore failed:', e);
-}
-
-setConfirm({
-  service: serviceName ?? 'Trimzi Booking',
-  dateLabel: formatUK(selectedDate),
-  timeLabel: selectedTime!,           // safe because we gate with isDisabled
-  barber: barber || 'Ian',
-  htmlLink: json.htmlLink ?? null,
-});
-setShowConfirm(true);
-
+    // Show your existing confirmation sheet
+    setConfirm({
+      service: serviceName ?? 'Trimzi Booking',
+      dateLabel: formatUK(selectedDate),
+      timeLabel: selectedTime!,
+      barber: barber || 'Ian',
+      htmlLink: json.htmlLink ?? null,
+    });
+    setShowConfirm(true);
   } catch (err: any) {
     console.error(err);
     alert(`Error: ${err.message ?? err}`);
@@ -283,6 +283,52 @@ setShowConfirm(true);
     setPending(false);
   }
 }
+
+
+
+async function handleBook() {
+  if (!selectedDate || !selectedTime) {
+    alert('Please choose a date and a time first.');
+    return;
+  }
+
+  // Before submitting, check if we have contact info
+  const u = auth.currentUser;
+  let existingName = '';
+  let existingPhone = '';
+
+  if (u && !u.isAnonymous) {
+    // Try profile doc
+    try {
+      const snap = await getDoc(doc(db, 'profiles', u.uid));
+      if (snap.exists()) {
+        const p = snap.data() as any;
+        existingName = (u.displayName || p?.name || '').trim();
+        existingPhone = (p?.phone || '').trim();
+      } else {
+        existingName = (u.displayName || '').trim();
+      }
+    } catch {
+      existingName = (u.displayName || '').trim();
+    }
+  } else {
+    // Guest: no guaranteed name/phone
+    existingName = '';
+    existingPhone = '';
+  }
+
+  // If we don't have a phone, open modal and let them provide it
+  if (!existingPhone) {
+    setContactName(existingName || '');
+    setContactPhone('');           // blank to prompt entry
+    setShowContactModal(true);
+    return; // wait for modal's "Save & continue"
+  }
+
+  // We have a phone already – proceed immediately
+  await submitBookingWith(existingName, existingPhone);
+}
+
 
 
   return (
@@ -451,6 +497,91 @@ setShowConfirm(true);
         </>
         )}
 
+{/* Contact details required (if no phone on profile) */}
+{showContactModal ? (
+  <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center">
+    {/* backdrop */}
+    <div
+      className="absolute inset-0 bg-black/40"
+      onClick={() => setShowContactModal(false)}
+    />
+    {/* modal */}
+    <div className="relative w-full sm:max-w-md bg-white rounded-t-2xl sm:rounded-2xl shadow-xl border border-brown/10 p-5 mx-auto">
+      <h2 className="text-brown text-lg font-semibold mb-2">Contact details required</h2>
+      <p className="text-brown/80 text-sm mb-4">
+        No login needed to make a booking, but we need a contact name and number in case the barber needs to reach you.
+      </p>
+
+      <div className="space-y-3">
+        <div>
+          <label className="block text-sm mb-1">Full name</label>
+          <input
+            className="w-full rounded-md border border-brown/20 bg-ivory px-3 py-2 text-sm"
+            value={contactName}
+            onChange={(e) => setContactName(e.target.value)}
+            placeholder="Your name"
+          />
+        </div>
+        <div>
+          <label className="block text-sm mb-1">Mobile number</label>
+          <input
+            type="tel"
+            className="w-full rounded-md border border-brown/20 bg-ivory px-3 py-2 text-sm"
+            value={contactPhone}
+            onChange={(e) => setContactPhone(e.target.value)}
+            placeholder="07..."
+          />
+        </div>
+      </div>
+
+      <div className="mt-5 flex gap-3">
+        <button
+          type="button"
+          disabled={savingContact}
+          className="flex-1 h-12 rounded-xl bg-brown text-white font-semibold hover:bg-brown/90 disabled:opacity-60"
+          onClick={async () => {
+            const phone = contactPhone.trim();
+            if (!phone) {
+              alert('Please enter a contact number to continue.');
+              return;
+            }
+
+            setSavingContact(true);
+            try {
+              const u = auth.currentUser;
+              if (u) {
+                // Save to profiles/{uid} (works for both guest and signed-in)
+                await setDoc(
+                  doc(db, 'profiles', u.uid),
+                  { name: contactName.trim(), phone },
+                  { merge: true }
+                );
+              }
+              setShowContactModal(false);
+              // Proceed with booking using these details
+              await submitBookingWith(contactName.trim(), phone);
+            } catch (e) {
+              console.error(e);
+              alert('Could not save contact details. Please try again.');
+            } finally {
+              setSavingContact(false);
+            }
+          }}
+        >
+          {savingContact ? 'Saving...' : 'Save & continue'}
+        </button>
+
+        <button
+          type="button"
+          className="h-12 rounded-xl px-4 border border-brown/20 text-brown hover:bg-ivory/80"
+          onClick={() => setShowContactModal(false)}
+        >
+          Cancel
+        </button>
+      </div>
+    </div>
+  </div>
+) : null}
 
         {/* Continue */}
         <div className="mt-8">
