@@ -41,6 +41,8 @@ export default function Onboarding() {
   const [name, setName] = useState('');
   const [pending, setPending] = useState(false);
   const disabled = pending;
+  const [showPassword, setShowPassword] = useState(false);
+  const [showGuestModal, setShowGuestModal] = useState(false);
 
   // DEV: pause auto-redirect while testing (set to false when done)
   const DEV_NO_AUTO_REDIRECT = true;
@@ -138,21 +140,43 @@ React.useEffect(() => {
     }
   };
 
+// Perform the actual anonymous sign-in
+const proceedGuest = async () => {
+  setPending(true);
+  try {
+    const cred = await signInAnonymously(auth);
+    await ensureProfile(cred.user.uid); // blank profile; collect name/phone later
+    router.push('/home');
+  } catch (e) {
+    console.error(e);
+    alert('Guest sign-in failed. Please try again.');
+  } finally {
+    setPending(false);
+  }
+};
+
+
   // --- Guest flow (anonymous) ---
-  const handleGuest = async () => {
-    if (disabled) return;
-    setPending(true);
-    try {
-      const cred = await signInAnonymously(auth);
-      await ensureProfile(cred.user.uid); // blank profile; you can collect name later
-      router.push('/home'); // booking flow can request phone/name before confirming
-    } catch (e) {
-      console.error(e);
-      alert('Guest sign-in failed. Please try again.');
-    } finally {
-      setPending(false);
+const handleGuest = async () => {
+  if (disabled) return;
+
+  // Show the one-time notice modal first (per browser session)
+  try {
+    if (typeof window !== 'undefined' && !sessionStorage.getItem('guestModalShown')) {
+      sessionStorage.setItem('guestModalShown', '1');
+      setShowGuestModal(true);
+      return; // do NOT sign in yet; wait for user to choose in the modal
     }
-  };
+  } catch {
+    // if sessionStorage fails, just show the modal
+    setShowGuestModal(true);
+    return;
+  }
+
+  // If the notice has already been shown in this session, proceed immediately
+  await proceedGuest();
+};
+
 
   return (
     <main className="min-h-dvh bg-ivory flex items-center justify-center">
@@ -276,20 +300,54 @@ React.useEffect(() => {
             </div>
 
             <div className="mb-4">
-              <label className="block text-sm mb-1">Password</label>
-              <input
-                type="password"
-                name="password"
-                className="w-full rounded-md border border-brown/20 bg-ivory px-3 py-2 text-sm"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                placeholder="••••••••"
-                autoComplete={mode === 'signin' ? 'current-password' : 'new-password'}
-                required
-                minLength={6}
-              />
-            </div>
+  <label htmlFor="password" className="block text-sm mb-1">Password</label>
 
+  <div className="relative">
+    <input
+      id="password"
+      type={showPassword ? 'text' : 'password'}
+      name="password"
+      className="w-full rounded-md border border-brown/20 bg-ivory px-3 py-2 pr-10 text-sm"
+      value={password}
+      onChange={(e) => setPassword(e.target.value)}
+      placeholder="••••••••"
+      autoComplete={mode === 'signin' ? 'current-password' : 'new-password'}
+      required
+      minLength={6}
+      aria-describedby="password-help"
+    />
+
+    {/* Eye toggle button */}
+    <button
+      type="button"
+      onClick={() => setShowPassword((v) => !v)}
+      aria-label={showPassword ? 'Hide password' : 'Show password'}
+      aria-pressed={showPassword}
+      className="absolute inset-y-0 right-2 flex items-center px-2 rounded-md hover:bg-brown/10 focus:outline-none focus:ring-2 focus:ring-brown/30"
+      tabIndex={0}
+    >
+      {/* Simple inline SVG so you don’t need any new assets */}
+      {showPassword ? (
+        // Eye-off icon
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <path d="M3 3l18 18" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/>
+          <path d="M10.58 10.58A3 3 0 0012 15a3 3 0 002.42-4.42M9.88 5.09A10.93 10.93 0 0112 5c7 0 10 7 10 7a17.5 17.5 0 01-3.05 3.89M6.61 6.61A17.74 17.74 0 002 12s3 7 10 7a10.73 10.73 0 004.38-.93" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+        </svg>
+      ) : (
+        // Eye icon
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7S1 12 1 12z" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+          <circle cx="12" cy="12" r="3" stroke="currentColor" strokeWidth="2"/>
+        </svg>
+      )}
+    </button>
+  </div>
+
+  {/* (optional) helper for screen readers; you already enforce minLength */}
+  <p id="password-help" className="sr-only">
+    Minimum 6 characters.
+  </p>
+</div>
             <div className="flex items-center gap-3">
               <button
                 type="submit"
@@ -309,6 +367,51 @@ React.useEffect(() => {
           </form>
         )}
       </div>
+    {/* Guest info modal */}
+{showGuestModal && (
+  <div className="fixed inset-0 z-50 flex items-center justify-center">
+    {/* backdrop */}
+    <div
+      className="absolute inset-0 bg-black/40"
+      onClick={() => setShowGuestModal(false)}
+      aria-hidden="true"
+    />
+
+    {/* dialog */}
+    <div
+      role="dialog"
+      aria-modal="true"
+      className="relative w-[92%] max-w-md bg-white rounded-2xl shadow-xl border border-brown/10 p-5"
+    >
+      <h2 className="text-brown text-lg font-semibold mb-2">Continue as Guest</h2>
+      <p className="text-brown/80 text-sm">
+        No login is needed to make a booking, but a contact name and number will be required
+        to confirm the booking in case the barber needs to contact you.
+      </p>
+
+      <div className="mt-5 flex gap-3">
+        <button
+          type="button"
+          className="flex-1 h-11 rounded-xl bg-brown text-white font-semibold hover:bg-brown/90"
+          onClick={async () => {
+            setShowGuestModal(false);
+            await proceedGuest();
+          }}
+        >
+          Continue
+        </button>
+        <button
+          type="button"
+          className="h-11 rounded-xl px-4 border border-brown/20 text-brown hover:bg-ivory/80"
+          onClick={() => setShowGuestModal(false)}
+        >
+          Back
+        </button>
+      </div>
+    </div>
+  </div>
+)}
+
     </main>
   );
 }
