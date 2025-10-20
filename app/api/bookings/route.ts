@@ -21,24 +21,70 @@ export async function POST(req: Request) {
     const end = addMinutes(start, 45);
     const endISO = end.toISOString();
 
-    // 1) Check conflicts now (calendar + active holds)
-    const busy = await fetchBusyIntervals(date);
+    // 1) Check conflicts now (calendar + active holds), but DO NOT self-conflict on your own hold
+const busy = await fetchBusyIntervals(date);
 
-    if (holdId) {
-      const snap = await adminDb.collection('holds').doc(holdId).get();
-      const h = snap.exists ? (snap.data() as any) : null;
-      const now = Date.now();
-      const exp = h?.expiresAt?.toMillis?.() ?? h?.expiresAt;
-      if (exp && exp > now) {
-        busy.push({ start: new Date(h.startISO), end: new Date(h.endISO) });
-      }
-    }
+// Normalize barber for holds (same casing used elsewhere)
+const barber = (barberName || 'Ian').charAt(0).toUpperCase() + (barberName || 'Ian').slice(1).toLowerCase();
 
-    const conflict = busy.some(b => overlaps({ start, end }, b));
-    if (conflict) {
-      return NextResponse.json({ error: 'Slot just taken. Please pick another time.' }, { status: 409 });
-    }
+// If a holdId is provided, verify the hold and keep it OUT of the busy list
+let selfHoldWindow: { start: Date; end: Date } | null = null;
+const nowMs = Date.now();
 
+if (holdId) {
+  const snap = await adminDb.collection('holds').doc(holdId).get();
+  const h = snap.exists ? (snap.data() as any) : null;
+
+  // Validate hold is active
+  const expMs =
+    h?.expiresAt?.toMillis?.() ??
+    (typeof h?.expiresAt === 'number' ? h.expiresAt : Date.parse(h?.expiresAt ?? ''));
+  const isActive = !!expMs && expMs > nowMs;
+
+  // Validate hold matches this selection (date/barber/start==startISO, end==start+45m)
+  const holdStart = h?.startISO ? new Date(h.startISO) : null;
+  const holdEnd   = h?.endISO ? new Date(h.endISO) : null;
+  const matchesWindow =
+    !!holdStart &&
+    !!holdEnd &&
+    Math.abs(holdStart.getTime() - start.getTime()) < 1000 && // same second
+    Math.abs(holdEnd.getTime() - end.getTime()) < 1000 &&
+    h?.date === date &&
+    (h?.barber || 'Ian') === barber;
+
+  if (!isActive || !matchesWindow) {
+    return NextResponse.json({ error: 'Hold expired or mismatched. Please reselect the time.' }, { status: 409 });
+  }
+
+  selfHoldWindow = { start: holdStart!, end: holdEnd! };
+}
+
+// Add all OTHER active holds for the same date/barber to busy (exclude our own holdId)
+const holdsSnap = await adminDb
+  .collection('holds')
+  .where('date', '==', date)
+  .where('barber', '==', barber)
+  .get();
+
+for (const d of holdsSnap.docs) {
+  const hd = d.data() as any;
+  if (holdId && d.id === holdId) continue; // skip our own hold
+
+  const expMs =
+    hd?.expiresAt?.toMillis?.() ??
+    (typeof hd?.expiresAt === 'number' ? hd.expiresAt : Date.parse(hd?.expiresAt ?? ''));
+  if (!expMs || expMs <= nowMs) continue; // only active holds
+
+  if (hd?.startISO && hd?.endISO) {
+    busy.push({ start: new Date(hd.startISO), end: new Date(hd.endISO) });
+  }
+}
+
+// Now check for conflicts (calendar busy + other active holds)
+const conflict = busy.some(b => overlaps({ start, end }, b));
+if (conflict) {
+  return NextResponse.json({ error: 'Slot just taken. Please pick another time.' }, { status: 409 });
+}
     const calendar = await getCalendar();
 
     const prettyDesc = [
