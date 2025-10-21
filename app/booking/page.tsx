@@ -115,10 +115,19 @@ function BookingContent() {
   const searchParams = useSearchParams();
   const serviceName = searchParams.get('name');
   const servicePrice = searchParams.get('price');
+  // Prefill barber if coming from "Rebook"
+const barberParam = searchParams.get('barber');
+
   const [selectedDate, setSelectedDate] = useState(toInputDate(new Date()));
   const dayIdx = useMemo(() => new Date(selectedDate).getDay(), [selectedDate]);
   const serviceDuration = searchParams.get('durationMins');
   const [barber, setBarber] = useState<string>("");
+  // Auto-select barber from query param (if valid)
+useEffect(() => {
+  if (barberParam && BARBERS.includes(barberParam as any)) {
+    setBarber(barberParam);
+  }
+}, [barberParam]);
   const [selectedTime, setSelectedTime] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
   const durationMins = Number(serviceDuration ?? 30); //fallback if query param missing

@@ -165,6 +165,7 @@ export default function BookingsPage() {
                         {typeof b.price === 'number' && (
                           <p className="text-brown/70 text-sm mt-1">£{b.price}</p>
                         )}
+                        {/*
                         {b.htmlLink && (
                           <p className="text-xs mt-2">
                             <a
@@ -177,21 +178,24 @@ export default function BookingsPage() {
                             </a>
                           </p>
                         )}
+                        */}
+
                       </div>
                       <div className="flex flex-col items-end gap-2 shrink-0">
                         <Link
-                          href={{
-                            pathname: '/booking',
-                            query: {
-                              name: b.serviceName,
-                              price: typeof b.price === 'number' ? b.price : undefined,
-                              durationMins: undefined, // optional: you can store & pass it if present
-                            },
-                          }}
-                          className="text-sm px-3 py-1 rounded-md bg-brown text-white hover:opacity-90"
-                        >
-                          Rebook
-                        </Link>
+  href={{
+    pathname: '/booking',
+    query: {
+      name: b.serviceName,
+      price: typeof b.price === 'number' ? b.price : undefined,
+      barber: b.barberName ?? 'Ian', // 👈 NEW: preselect barber (default to Ian)
+      durationMins: undefined,
+    },
+  }}
+  className="text-sm px-3 py-1 rounded-md bg-brown text-white hover:opacity-90"
+>
+  Rebook
+</Link>
                       </div>
                     </li>
                   ))}
@@ -225,17 +229,18 @@ export default function BookingsPage() {
                       </div>
                       <div className="flex flex-col items-end gap-2 shrink-0">
                         <Link
-                          href={{
-                            pathname: '/booking',
-                            query: {
-                              name: b.serviceName,
-                              price: typeof b.price === 'number' ? b.price : undefined,
-                            },
-                          }}
-                          className="text-sm px-3 py-1 rounded-md border border-brown/20 text-brown hover:bg-brown/5"
-                        >
-                          Rebook
-                        </Link>
+  href={{
+    pathname: '/booking',
+    query: {
+      name: b.serviceName,
+      price: typeof b.price === 'number' ? b.price : undefined,
+      barber: b.barberName ?? 'Ian', // 👈 same addition here
+    },
+  }}
+  className="text-sm px-3 py-1 rounded-md border border-brown/20 text-brown hover:bg-brown/5"
+>
+  Rebook
+</Link>
                       </div>
                     </li>
                   ))}
