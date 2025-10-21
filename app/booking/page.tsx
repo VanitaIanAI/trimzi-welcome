@@ -93,6 +93,24 @@ function toISO(dateStr: string, timeStr: string): string {
   return d.toISOString();
 }
 
+// --- Phone helpers (UK mobile) ---
+// Accepts "07XXXXXXXXX" or "+447XXXXXXXXX". Returns normalized E.164 ("+44XXXXXXXXXX") if valid, else null.
+function normalizeUKMobile(raw: string): string | null {
+  const p = raw.replace(/[^\d+]/g, ''); // keep digits and a single leading +
+  // +44 7XXXXXXXXX
+  if (/^\+447\d{9}$/.test(p)) return p;
+  // 07XXXXXXXXX  -> +44XXXXXXXXXX
+  if (/^07\d{9}$/.test(p)) return p.replace(/^0/, '+44');
+  return null;
+}
+
+// Looser check for instant feedback (allows spaces/dashes)
+function looksLikeUKMobile(raw: string): boolean {
+  const p = raw.replace(/[^\d+]/g, '');
+  return /^\+447\d{9}$/.test(p) || /^07\d{9}$/.test(p);
+}
+
+
 function BookingContent() {
   const searchParams = useSearchParams();
   const serviceName = searchParams.get('name');
@@ -126,6 +144,73 @@ const [showContactModal, setShowContactModal] = useState(false);
 const [contactName, setContactName] = useState('');
 const [contactPhone, setContactPhone] = useState('');
 const [savingContact, setSavingContact] = useState(false);
+
+// --- Optional "note to barber" modal state ---
+const [showNoteModal, setShowNoteModal] = useState(false);
+const [noteText, setNoteText] = useState('');
+const NOTE_MAX = 300;
+
+// --- Add-to-calendar helpers ---
+function isoToGCal(iso: string) {
+  // 2025-10-22T15:00:00.000Z -> 20251022T150000Z
+  return iso.replace(/[-:]/g, '').replace(/\.\d{3}Z$/, 'Z');
+}
+
+function buildCalendarLinks(opts: {
+  service: string;
+  barber: string;
+  dateISO: string;     // "YYYY-MM-DD"
+  timeHHMM: string;    // "HH:mm"
+  durationMins: number;
+  note?: string;
+}) {
+  const { service, barber, dateISO, timeHHMM, durationMins, note = '' } = opts;
+
+  // reuse your existing helpers
+  const startISO = toISO(dateISO, timeHHMM);
+  const end = new Date(startISO);
+  end.setMinutes(end.getMinutes() + durationMins);
+  const endISO = end.toISOString();
+
+  const startG = isoToGCal(startISO);
+  const endG   = isoToGCal(endISO);
+
+  const title   = service ? `${service} — ${barber}` : 'Trimzi Booking';
+  const details = `Booked via Trimzi — Barber: ${barber}${note ? `\n\nNote: ${note}` : ''}`;
+  // same address you show on the Kelvinhair page
+  const location = '116 Queen Margaret Drive, Kelvinside, Glasgow G20 8NZ';
+
+  // Google Calendar link
+  const gcalUrl = `https://calendar.google.com/calendar/render?action=TEMPLATE&text=${encodeURIComponent(title)}&dates=${startG}/${endG}&details=${encodeURIComponent(details)}&location=${encodeURIComponent(location)}`;
+
+  // Simple ICS (data URI)
+  const uid = `trimzi-${startG}`;
+  const ics = [
+    'BEGIN:VCALENDAR',
+    'VERSION:2.0',
+    'PRODID:-//TrimZi//EN',
+    'CALSCALE:GREGORIAN',
+    'METHOD:PUBLISH',
+    'BEGIN:VEVENT',
+    `UID:${uid}`,
+    `DTSTAMP:${startG}`,
+    `DTSTART:${startG}`,
+    `DTEND:${endG}`,
+    `SUMMARY:${title}`,
+    `DESCRIPTION:${details.replace(/\n/g, '\\n')}`,
+    `LOCATION:${location}`,
+    'END:VEVENT',
+    'END:VCALENDAR',
+  ].join('\r\n');
+
+  const icsHref = `data:text/calendar;charset=utf-8,${encodeURIComponent(ics)}`;
+
+  return { gcalUrl, icsHref };
+}
+
+
+// we’ll stash the name/phone we’re going to submit with, then ask for the note
+const [pendingContact, setPendingContact] = useState<{ name: string; phone: string } | null>(null);
 
 
   // Start time differs for Saturday
@@ -206,7 +291,7 @@ async function getCustomerDetails() {
   return { customerName, customerPhone };
 }
 
-async function submitBookingWith(customerName: string, customerPhone: string) {
+async function submitBookingWith(customerName: string, customerPhone: string, note: string = '') {
   setPending(true);
   try {
     // Build start/end ISO strings (your booking is always 45m – we keep your current derivation)
@@ -230,6 +315,7 @@ async function submitBookingWith(customerName: string, customerPhone: string) {
         customerPhone,
         date: selectedDate,
         holdId: holdId || null,
+        noteText: note,
       }),
     });
 
@@ -259,6 +345,7 @@ async function submitBookingWith(customerName: string, customerPhone: string) {
             status: 'upcoming',
             htmlLink: json.htmlLink ?? null,
             createdAt: serverTimestamp(),
+            note: note ? note : null,
           },
           { merge: true }
         );
@@ -325,8 +412,11 @@ async function handleBook() {
     return; // wait for modal's "Save & continue"
   }
 
-  // We have a phone already – proceed immediately
-  await submitBookingWith(existingName, existingPhone);
+// We have a phone already – ask for an optional note before submitting
+setPendingContact({ name: existingName, phone: existingPhone });
+setShowNoteModal(true);
+return;
+
 }
 
 
@@ -525,12 +615,15 @@ async function handleBook() {
         <div>
           <label className="block text-sm mb-1">Mobile number</label>
           <input
-            type="tel"
-            className="w-full rounded-md border border-brown/20 bg-ivory px-3 py-2 text-sm"
-            value={contactPhone}
-            onChange={(e) => setContactPhone(e.target.value)}
-            placeholder="07..."
-          />
+  type="tel"
+  inputMode="tel"
+  pattern="^(\+447\d{9}|07\d{9})$"
+  className="w-full rounded-md border border-brown/20 bg-ivory px-3 py-2 text-sm"
+  value={contactPhone}
+  onChange={(e) => setContactPhone(e.target.value)}
+  placeholder="+44 7XXXXXXXXX or 07XXXXXXXXX"
+  aria-invalid={contactPhone ? !looksLikeUKMobile(contactPhone) : undefined}
+/>
         </div>
       </div>
 
@@ -540,33 +633,37 @@ async function handleBook() {
           disabled={savingContact}
           className="flex-1 h-12 rounded-xl bg-brown text-white font-semibold hover:bg-brown/90 disabled:opacity-60"
           onClick={async () => {
-            const phone = contactPhone.trim();
-            if (!phone) {
-              alert('Please enter a contact number to continue.');
-              return;
-            }
+  const normalized = normalizeUKMobile(contactPhone.trim());
 
-            setSavingContact(true);
-            try {
-              const u = auth.currentUser;
-              if (u) {
-                // Save to profiles/{uid} (works for both guest and signed-in)
-                await setDoc(
-                  doc(db, 'profiles', u.uid),
-                  { name: contactName.trim(), phone },
-                  { merge: true }
-                );
-              }
-              setShowContactModal(false);
-              // Proceed with booking using these details
-              await submitBookingWith(contactName.trim(), phone);
-            } catch (e) {
-              console.error(e);
-              alert('Could not save contact details. Please try again.');
-            } finally {
-              setSavingContact(false);
-            }
-          }}
+  if (!normalized) {
+    alert('Please enter a valid UK mobile number (07XXXXXXXXX or +447XXXXXXXXX).');
+    return;
+  }
+
+  setSavingContact(true);
+  try {
+    const u = auth.currentUser;
+    if (u) {
+      // Save normalized E.164 into profiles/{uid}
+      await setDoc(
+        doc(db, 'profiles', u.uid),
+        { name: contactName.trim(), phone: normalized },
+        { merge: true }
+      );
+    }
+    setShowContactModal(false);
+
+    // After we have contact details, ask for an optional note
+    setPendingContact({ name: contactName.trim(), phone: normalized });
+    setShowNoteModal(true);
+  } catch (e) {
+    console.error(e);
+    alert('Could not save contact details. Please try again.');
+  } finally {
+    setSavingContact(false);
+  }
+}}
+
         >
           {savingContact ? 'Saving...' : 'Save & continue'}
         </button>
@@ -582,6 +679,76 @@ async function handleBook() {
     </div>
   </div>
 ) : null}
+
+{/* Optional Note to Barber modal */}
+{showNoteModal && pendingContact ? (
+  <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center">
+    {/* backdrop */}
+    <div
+      className="absolute inset-0 bg-black/40"
+      onClick={() => {
+        // clicking backdrop = skip
+        setShowNoteModal(false);
+        submitBookingWith(pendingContact.name, pendingContact.phone, '');
+        setPendingContact(null);
+      }}
+    />
+    {/* modal */}
+    <div className="relative w-full sm:max-w-md bg-white rounded-t-2xl sm:rounded-2xl shadow-xl border border-brown/10 p-5 mx-auto">
+      <h2 className="text-brown text-lg font-semibold mb-2">Any notes for your barber?</h2>
+      <p className="text-brown/80 text-sm mb-3">
+        Optional. Add anything helpful (e.g. “keep length on top”, “sensitive skin”, “re-style”).
+      </p>
+
+      <div>
+        <textarea
+          value={noteText}
+          onChange={(e) => {
+            const v = e.target.value.slice(0, NOTE_MAX);
+            setNoteText(v);
+          }}
+          rows={4}
+          className="w-full rounded-md border border-brown/20 bg-ivory px-3 py-2 text-sm"
+          placeholder="Type a short note (max 300 chars)…"
+          autoFocus
+        />
+        <div className="mt-1 text-xs text-brown/60 text-right">
+          {noteText.length}/{NOTE_MAX}
+        </div>
+      </div>
+
+      <div className="mt-5 flex gap-3">
+        <button
+          type="button"
+          className="h-12 rounded-xl px-4 border border-brown/20 text-brown hover:bg-ivory/80 flex-1"
+          onClick={() => {
+            // skip note
+            setShowNoteModal(false);
+            submitBookingWith(pendingContact.name, pendingContact.phone, '');
+            setPendingContact(null);
+            setNoteText('');
+          }}
+        >
+          Skip
+        </button>
+
+        <button
+          type="button"
+          className="flex-1 h-12 rounded-xl bg-brown text-white font-semibold hover:bg-brown/90"
+          onClick={() => {
+            setShowNoteModal(false);
+            submitBookingWith(pendingContact.name, pendingContact.phone, noteText.trim());
+            setPendingContact(null);
+            setNoteText('');
+          }}
+        >
+          Add note & continue
+        </button>
+      </div>
+    </div>
+  </div>
+) : null}
+
 
         {/* Continue */}
         <div className="mt-8">
@@ -642,18 +809,40 @@ async function handleBook() {
           <span className="font-medium text-brown">{confirm!.barber}</span>
         </div>
 
-        {confirm!.htmlLink ? (
-          <p className="pt-2 text-xs">
-            <a
-              href={confirm!.htmlLink ?? undefined}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-brown hover:underline"
-            >
-              View in calendar
-            </a>
-          </p>
-        ) : null}
+        {/* Add to calendar (user’s own) */}
+{(() => {
+  // Protect against edge cases where state isn’t ready yet
+  if (!confirm || !selectedTime) return null;
+
+  const { gcalUrl, icsHref } = buildCalendarLinks({
+    service: confirm.service,
+    barber: confirm.barber || 'Ian',
+    dateISO: selectedDate,          // "YYYY-MM-DD"
+    timeHHMM: selectedTime,         // "HH:mm"
+    durationMins,                   // you already have this
+    note: noteText || '',           // include if you want to reflect an added note
+  });
+
+  return (
+    <div className="pt-3 flex items-center gap-3">
+      <a
+        href={gcalUrl}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="text-xs text-brown underline hover:no-underline"
+      >
+        Add to Google Calendar
+      </a>
+      <a
+        href={icsHref}
+        download="trimzi-booking.ics"
+        className="text-xs text-brown/80 underline hover:no-underline"
+      >
+        Add to Calendar
+      </a>
+    </div>
+  );
+})()}
       </div>
 
       <div className="mt-5 flex gap-3">

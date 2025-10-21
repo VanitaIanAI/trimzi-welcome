@@ -10,7 +10,19 @@ export async function POST(req: Request) {
     assertEnv('GOOGLE_CALENDAR_ID');
 
     const body = await req.json();
-    const { summary, description, startISO, attendeeEmail, barberName, customerName, customerPhone, holdId, date } = body;
+    const {
+  summary,
+  description,
+  startISO,
+  attendeeEmail,
+  barberName,
+  customerName,
+  customerPhone,
+  holdId,
+  date,
+  // NEW:
+  noteText,
+} = body;
 
     if (!summary || !startISO || !date) {
       return NextResponse.json({ error: 'summary, date and startISO are required' }, { status: 400 });
@@ -88,12 +100,14 @@ if (conflict) {
     const calendar = await getCalendar();
 
     const prettyDesc = [
-      description ?? `Booked via Trimzi${barberName ? ` · Barber: ${barberName}` : ''}`,
-      '',
-      customerName ? `Customer: ${customerName}` : null,
-      customerPhone ? `Phone: ${customerPhone}` : null,
-      summary ? `Service: ${summary}` : null,
-    ].filter(Boolean).join('\n');
+  description ?? `Booked via Trimzi${barberName ? ` · Barber: ${barberName}` : ''}`,
+  '',
+  customerName ? `Customer: ${customerName}` : null,
+  customerPhone ? `Phone: ${customerPhone}` : null,
+  summary ? `Service: ${summary}` : null,
+  noteText ? '' : null,
+  noteText ? `Note from customer: ${noteText}` : null,
+].filter(Boolean).join('\n');
 
     const event = {
       summary: customerName ? `${summary} — ${customerName}` : summary,

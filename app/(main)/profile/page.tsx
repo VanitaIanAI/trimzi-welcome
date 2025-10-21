@@ -282,7 +282,7 @@ export default function ProfilePage() {
         {error && <div className="text-sm text-red-600">{error}</div>}
         {saved && <div className="text-sm text-green-700">Saved.</div>}
 
-        <div className="flex gap-3">
+        <div className="flex items-center gap-3">
           <button
             type="submit"
             disabled={saving}
@@ -292,8 +292,8 @@ export default function ProfilePage() {
           </button>
 
           <Link
-            href="/(main)/home"
-            className="h-11 rounded-xl px-4 border border-brown/20 text-brown hover:bg-ivory/80"
+            href="/home"
+            className="h-11 rounded-xl px-4 border border-brown/20 text-brown hover:bg-ivory/80 inline-flex items-center justify-center"
           >
             Cancel
           </Link>
