@@ -1,6 +1,9 @@
 /* app/onboarding/page.tsx */
 'use client';
 
+// TEMP: verbose Firebase Auth logs in console
+if (typeof window !== 'undefined') localStorage.setItem('firebase:log','true');
+
 import Image from 'next/image';
 import { useRouter } from 'next/navigation';
 import React, { useState } from 'react';
@@ -14,6 +17,10 @@ import {
   signInWithEmailAndPassword,
   getRedirectResult,
   onAuthStateChanged,
+  linkWithPopup,
+  linkWithRedirect,
+  GoogleAuthProvider,
+  User,
   UserCredential,
 } from 'firebase/auth';
 import { doc, setDoc, serverTimestamp } from 'firebase/firestore';
@@ -32,6 +39,7 @@ async function ensureProfile(
 
 export default function Onboarding() {
   const router = useRouter();
+  const redirectCheckedRef = React.useRef(false);
 
   // Inline email form state
   const [showEmailForm, setShowEmailForm] = useState(false);
@@ -45,36 +53,57 @@ export default function Onboarding() {
   const [showGuestModal, setShowGuestModal] = useState(false);
 
   // DEV: pause auto-redirect while testing (set to false when done)
-  const DEV_NO_AUTO_REDIRECT = true;
+  const DEV_NO_AUTO_REDIRECT = false;
 
-  // Consume Google redirect result *and* wait for Auth to be ready
+  // On github.dev, the redirect flow loses state.  Force popup there.
+  const FORCE_POPUP = 
+    typeof window !== 'undefined' && window.location.host.endsWith('.github.dev');
+
+// Handle Google redirect result ONCE on first mount
+React.useEffect(() => {
+  if (redirectCheckedRef.current) return;
+  redirectCheckedRef.current = true;
+
+  (async () => {
+    try {
+      const cred = await getRedirectResult(auth);
+      console.log('[Auth] getRedirectResult (mount):', cred);
+
+      if (cred?.user && !cred.user.isAnonymous) {
+        if (DEV_NO_AUTO_REDIRECT) return;
+
+        await ensureProfile(cred.user.uid, {
+          name: cred.user.displayName ?? '',
+          email: cred.user.email ?? '',
+        });
+        window.location.assign('/home');
+      }
+    } catch (e) {
+      console.warn('[Auth] getRedirectResult threw:', e);
+    }
+  })();
+}, [router]);
+
+
+
+  // Listen for auth state changes (popup success or post-redirect sign-in)
 React.useEffect(() => {
   const unsub = onAuthStateChanged(auth, async (u) => {
     try {
-      if (u) {
-        // In dev mode, do not auto-redirect when a user is already signed in
+      console.log('[Auth] onAuthStateChanged user:', u?.uid, { isAnonymous: u?.isAnonymous });
+
+      if (u && !u.isAnonymous) {
         if (DEV_NO_AUTO_REDIRECT) return;
 
         await ensureProfile(u.uid, {
           name: u.displayName ?? '',
           email: u.email ?? '',
         });
-        router.push('/home');
+        window.location.assign('/home');
         return;
       }
 
-      // If not signed in yet, check if a redirect just completed
-      const cred = await getRedirectResult(auth);
-      if (cred?.user) {
-        // In dev mode, do not auto-redirect after redirect-based sign-in
-        if (DEV_NO_AUTO_REDIRECT) return;
-        
-        await ensureProfile(cred.user.uid, {
-          name: cred.user.displayName ?? '',
-          email: cred.user.email ?? '',
-        });
-        router.push('/home');
-      }
+      // If here: no user or anonymous user. Redirect result is handled by the separate "mount" effect.
     } catch (e) {
       console.warn('Auth init / redirect handling failed:', e);
     }
@@ -84,40 +113,62 @@ React.useEffect(() => {
 }, [router]);
 
 
-  // --- Google flow ---
-  const handleGoogle = async () => {
-    if (disabled) return;
-    setPending(true);
+
+ // --- Google flow (popup on github.dev; redirect elsewhere; upgrades anonymous users) ---
+const handleGoogle = async () => {
+  if (disabled) return;
+  setPending(true);
+  try {
+    const current = auth.currentUser;
+    console.log('[Auth] handleGoogle: currentUser:', current?.uid, { isAnonymous: current?.isAnonymous });
+
     try {
-      let cred: UserCredential | null = null;
-      try {
-        // try popup first
-        cred = await signInWithPopup(auth, googleProvider);
-      } catch (err: any) {
-        console.warn('Popup sign-in failed, falling back to redirect:', err?.code || err);
-        await signInWithRedirect(auth, googleProvider);
-        return; // page will reload after redirect
+      if (FORCE_POPUP) {
+        // ✅ On github.dev use POPUP first (redirect loses state)
+        if (current && current.isAnonymous) {
+          console.log('[Auth] linkWithPopup -> Google (upgrade anon)');
+          await linkWithPopup(current, googleProvider);
+        } else {
+          console.log('[Auth] signInWithPopup -> Google');
+          await signInWithPopup(auth, googleProvider);
+        }
+        console.log('[Auth] popup flow resolved — onAuthStateChanged will run');
+        return;
       }
 
-      const u = cred?.user;
-      if (u) {
-        try {
-          await ensureProfile(u.uid, {
-            name: u.displayName ?? '',
-            email: u.email ?? '',
-          });
-        } catch (e) {
-          console.warn('ensureProfile (google) failed:', e);
-        }
-        router.push('/home');
+      // Elsewhere (localhost / deployed), prefer REDIRECT
+      if (current && current.isAnonymous) {
+        console.log('[Auth] linkWithRedirect -> Google (upgrade anon)');
+        await linkWithRedirect(current, googleProvider);
+      } else {
+        console.log('[Auth] signInWithRedirect -> Google');
+        await signInWithRedirect(auth, googleProvider);
       }
-    } catch (e: any) {
-      console.error('Google sign-in failed:', e?.code || e, e);
-      alert('Google sign-in failed.');
-    } finally {
-      setPending(false);
+      return; // page will navigate; getRedirectResult/onAuthStateChanged will handle it
+    } catch (err: any) {
+      console.warn('[Auth] primary flow failed, falling back. code=', err?.code, 'message=', err?.message);
+
+      // Fallback: if popup failed on non-github hosts, try redirect; if redirect failed on github, surface error.
+      if (FORCE_POPUP) {
+        throw err; // on github.dev we don't attempt redirect fallback
+      } else {
+        if (current && current.isAnonymous) {
+          console.log('[Auth] (fallback) linkWithRedirect -> Google (upgrade anon)');
+          await linkWithRedirect(current, googleProvider);
+        } else {
+          console.log('[Auth] (fallback) signInWithRedirect -> Google');
+          await signInWithRedirect(auth, googleProvider);
+        }
+        return;
+      }
     }
-  };
+  } catch (e: any) {
+    console.error('[Auth] Google flow failed at outer try:', e?.code || e, e);
+    alert('Google sign-in failed.');
+  } finally {
+    setPending(false);
+  }
+};
 
   // --- Email flow (signup/signin) ---
   const handleEmail = async (e: React.FormEvent) => {
