@@ -39,4 +39,9 @@ if (typeof window !== 'undefined') {
 export const db = getFirestore(app);
 export const googleProvider = new GoogleAuthProvider();
 
+// Guarded to avoid build/runtime hiccups if the method isn't present in your SDK/env
+try {
+  (googleProvider as any).setCustomParameters?.({ prompt: 'select_account' });
+} catch {}
+
 export default app;
