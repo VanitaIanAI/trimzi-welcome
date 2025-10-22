@@ -22,6 +22,7 @@ import {
   GoogleAuthProvider,
   User,
   UserCredential,
+  sendPasswordResetEmail,
 } from 'firebase/auth';
 import { doc, setDoc, serverTimestamp } from 'firebase/firestore';
 
@@ -51,6 +52,9 @@ export default function Onboarding() {
   const disabled = pending;
   const [showPassword, setShowPassword] = useState(false);
   const [showGuestModal, setShowGuestModal] = useState(false);
+  // Show a blocking overlay across the redirect round-trip
+const [authInProgress, setAuthInProgress] = useState(false);
+
 
   // DEV: pause auto-redirect while testing (set to false when done)
   const DEV_NO_AUTO_REDIRECT = false;
@@ -58,6 +62,15 @@ export default function Onboarding() {
   // On github.dev, the redirect flow loses state.  Force popup there.
   const FORCE_POPUP = 
     typeof window !== 'undefined' && window.location.host.endsWith('.github.dev');
+
+    // If a Google flow is already in progress (pre-redirect), keep overlay visible after we come back
+React.useEffect(() => {
+  try {
+    if (typeof window !== 'undefined' && sessionStorage.getItem('authInProgress') === '1') {
+      setAuthInProgress(true);
+    }
+  } catch {}
+}, []);
 
 // Handle Google redirect result ONCE on first mount
 React.useEffect(() => {
@@ -70,14 +83,18 @@ React.useEffect(() => {
       console.log('[Auth] getRedirectResult (mount):', cred);
 
       if (cred?.user && !cred.user.isAnonymous) {
-        if (DEV_NO_AUTO_REDIRECT) return;
+  if (DEV_NO_AUTO_REDIRECT) return;
 
-        await ensureProfile(cred.user.uid, {
-          name: cred.user.displayName ?? '',
-          email: cred.user.email ?? '',
-        });
-        window.location.assign('/home');
-      }
+  await ensureProfile(cred.user.uid, {
+    name: cred.user.displayName ?? '',
+    email: cred.user.email ?? '',
+  });
+
+  try { sessionStorage.removeItem('authInProgress'); } catch {}
+  setAuthInProgress(false);
+
+  window.location.assign('/home');
+}
     } catch (e) {
       console.warn('[Auth] getRedirectResult threw:', e);
     }
@@ -93,15 +110,19 @@ React.useEffect(() => {
       console.log('[Auth] onAuthStateChanged user:', u?.uid, { isAnonymous: u?.isAnonymous });
 
       if (u && !u.isAnonymous) {
-        if (DEV_NO_AUTO_REDIRECT) return;
+  if (DEV_NO_AUTO_REDIRECT) return;
 
-        await ensureProfile(u.uid, {
-          name: u.displayName ?? '',
-          email: u.email ?? '',
-        });
-        window.location.assign('/home');
-        return;
-      }
+  await ensureProfile(u.uid, {
+    name: u.displayName ?? '',
+    email: u.email ?? '',
+  });
+
+  try { sessionStorage.removeItem('authInProgress'); } catch {}
+  setAuthInProgress(false);
+
+  window.location.assign('/home');
+  return;
+}
 
       // If here: no user or anonymous user. Redirect result is handled by the separate "mount" effect.
     } catch (e) {
@@ -118,6 +139,11 @@ React.useEffect(() => {
 const handleGoogle = async () => {
   if (disabled) return;
   setPending(true);
+
+
+setAuthInProgress(true);
+try { sessionStorage.setItem('authInProgress', '1'); } catch {}
+
   try {
     const current = auth.currentUser;
     console.log('[Auth] handleGoogle: currentUser:', current?.uid, { isAnonymous: current?.isAnonymous });
@@ -162,6 +188,10 @@ const handleGoogle = async () => {
         return;
       }
     }
+  
+  setAuthInProgress(false);
+try { sessionStorage.removeItem('authInProgress'); } catch {}
+  
   } catch (e: any) {
     console.error('[Auth] Google flow failed at outer try:', e?.code || e, e);
     alert('Google sign-in failed.');
@@ -183,12 +213,46 @@ const handleGoogle = async () => {
         await signInWithEmailAndPassword(auth, email.trim(), password);
       }
       router.push('/home');
-    } catch (err) {
-      console.error(err);
-      alert('Email auth failed. Please check your details and try again.');
-    } finally {
-      setPending(false);
+    } catch (err: any) {
+  console.error('[Auth] email flow error:', err?.code || err, err);
+
+  const code = err?.code;
+
+  if (mode === 'signup') {
+    switch (code) {
+      case 'auth/email-already-in-use':
+        alert('That email is already in use. Try signing in instead, or use “Forgot password?”.');
+        return;
+      case 'auth/invalid-email':
+        alert('That email address looks invalid.');
+        return;
+      case 'auth/weak-password':
+        alert('Password is too weak. Please use at least 6 characters.');
+        return;
+      default:
+        alert('Could not create your account. Please check details and try again.');
+        return;
     }
+  } else {
+    // mode === 'signin'
+    switch (code) {
+      case 'auth/invalid-credential':
+      case 'auth/wrong-password':
+        alert('Incorrect email or password.');
+        return;
+      case 'auth/user-not-found':
+        alert('No account found for that email. Create an account first.');
+        return;
+      case 'auth/invalid-email':
+        alert('That email address looks invalid.');
+        return;
+      default:
+        alert('Sign-in failed. Please check your details and try again.');
+        return;
+    }
+  }
+}
+
   };
 
 // Perform the actual anonymous sign-in
@@ -201,6 +265,34 @@ const proceedGuest = async () => {
   } catch (e) {
     console.error(e);
     alert('Guest sign-in failed. Please try again.');
+  } finally {
+    setPending(false);
+  }
+};
+
+// --- Password reset (email) ---
+const handleForgotPassword = async () => {
+  if (disabled) return;
+  if (!email.trim()) {
+    alert('Enter your email above first, then tap “Forgot password?”.');
+    return;
+  }
+  setPending(true);
+  try {
+    await sendPasswordResetEmail(auth, email.trim());
+    alert('Password reset email sent. Please check your inbox.');
+  } catch (err: any) {
+    console.error('[Auth] sendPasswordResetEmail error:', err?.code || err, err);
+    switch (err?.code) {
+      case 'auth/invalid-email':
+        alert('That email address looks invalid.');
+        break;
+      case 'auth/user-not-found':
+        alert('No account exists with that email.');
+        break;
+      default:
+        alert('Could not send reset email. Please try again.');
+    }
   } finally {
     setPending(false);
   }
@@ -395,14 +487,31 @@ const handleGuest = async () => {
   </div>
 
   {/* (optional) helper for screen readers; you already enforce minLength */}
+  {/* (optional) helper for screen readers; you already enforce minLength */}
   <p id="password-help" className="sr-only">
     Minimum 6 characters.
   </p>
 </div>
-            <div className="flex items-center gap-3">
-              <button
-                type="submit"
-                disabled={disabled}
+
+{/* Forgot password — only in Sign in mode */}
+{mode === 'signin' && (
+  <div className="mb-3 -mt-1">
+    <button
+      type="button"
+      onClick={handleForgotPassword}
+      disabled={disabled}
+      className="text-sm text-brown/80 hover:text-brown underline underline-offset-2"
+      aria-label="Forgot your password?"
+    >
+      Forgot your password?
+    </button>
+  </div>
+)}
+
+<div className="flex items-center gap-3">
+  <button
+    type="submit"                
+    disabled={disabled}
                 className="flex-1 h-11 rounded-xl bg-brown text-white font-semibold hover:bg-brown/90 transition disabled:opacity-60"
               >
                 {mode === 'signup' ? 'Create account' : 'Sign in'}
@@ -459,6 +568,24 @@ const handleGuest = async () => {
           Back
         </button>
       </div>
+    </div>
+  </div>
+)}
+
+{/* Blocking overlay while Google sign-in is completing */}
+{authInProgress && (
+  <div
+    className="fixed inset-0 z-[100] bg-black/40 flex items-center justify-center"
+    aria-live="polite"
+    aria-busy="true"
+    role="status"
+  >
+    <div className="mx-auto w-[90%] max-w-sm rounded-2xl bg-white border border-brown/10 p-5 shadow-xl text-center">
+      <div className="mx-auto mb-3 h-8 w-8 rounded-full border-2 border-brown/20 border-t-brown animate-spin" />
+      <p className="text-brown text-sm font-medium">Signing you in…</p>
+      <p className="text-brown/70 text-xs mt-1">
+        Just a moment while we complete Google sign-in.
+      </p>
     </div>
   </div>
 )}

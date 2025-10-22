@@ -147,6 +147,7 @@ const [confirm, setConfirm] = useState<{
 const [available, setAvailable] = useState<string[]>([]);
 const [holdId, setHoldId] = useState<string | null>(null);
 const [holdExpiry,setHoldExpiry] = useState<number | null>(null);
+const [loadingAvail, setLoadingAvail] = useState(false);
 
 // --- Contact details modal state (for users without phone) ---
 const [showContactModal, setShowContactModal] = useState(false);
@@ -247,16 +248,35 @@ useEffect(() => {
     }
   };
 
-  const fetchAvail = async () => {
-    if (!OPEN_DAYS.includes(dayIdx as any) || !barber) {
-      setAvailable([]);
-      return;
-    }
+ const fetchAvail = async () => {
+  if (!OPEN_DAYS.includes(dayIdx as any) || !barber) {
+    setAvailable([]);
+    setLoadingAvail(false);
+    return;
+  }
+  setLoadingAvail(true);
+  try {
     const barberParam = barber.charAt(0).toUpperCase() + barber.slice(1).toLowerCase();
     const res = await fetch(`/api/availability?date=${selectedDate}&barber=${encodeURIComponent(barberParam)}`);
     const json = await res.json();
     setAvailable(json.available || []);
-  };
+  } catch (e) {
+    console.error('Fetch availability failed:', e);
+    setAvailable([]);
+  } finally {
+    setLoadingAvail(false);
+  }
+};
+
+
+
+{/* Show loader while we fetch availability */}
+{loadingAvail && OPEN_DAYS.includes(dayIdx as any) && barber && (
+  <div className="mt-6 rounded-2xl bg-white border border-brown/10 p-4 flex items-center gap-3">
+    <div className="h-5 w-5 rounded-full border-2 border-brown/20 border-t-brown animate-spin" />
+    <p className="text-sm text-brown">Checking available times…</p>
+  </div>
+)}
 
   release().finally(fetchAvail);
 }, [selectedDate, barber, dayIdx]); // re-run whenever these change
@@ -523,6 +543,13 @@ return;
           <>
         
 
+          {/* Show loader while we fetch availability */}
+{loadingAvail && OPEN_DAYS.includes(dayIdx as any) && barber && (
+  <div className="mt-6 rounded-2xl bg-white border border-brown/10 p-4 flex items-center gap-3">
+    <div className="h-5 w-5 rounded-full border-2 border-brown/20 border-t-brown animate-spin" />
+    <p className="text-sm text-brown">Checking available times…</p>
+  </div>
+)}
 
         {/* Sections */}
         {(['Morning','Midday / Afternoon','Afternoon / Evening'] as const).map((section) => {
