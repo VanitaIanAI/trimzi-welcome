@@ -93,6 +93,41 @@ function toISO(dateStr: string, timeStr: string): string {
   return d.toISOString();
 }
 
+// --- UK "now" helpers and past-slot check ---
+function nowUKDateAndTime() {
+  const parts = new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'Europe/London',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  }).formatToParts(new Date());
+
+  const get = (t: string) => parts.find(p => p.type === t)?.value || '';
+  const yyyy = get('year');
+  const mm   = get('month');
+  const dd   = get('day');
+  const hh   = get('hour');
+  const min  = get('minute');
+
+  return {
+    dateISO: `${yyyy}-${mm}-${dd}`,   // "YYYY-MM-DD" in UK local time
+    timeHHMM: `${hh}:${min}`,         // "HH:mm" in UK local time
+  };
+}
+
+function isSlotInPast(dateISO: string, timeHHMM: string) {
+  const { dateISO: todayUK, timeHHMM: nowUK } = nowUKDateAndTime();
+
+  if (dateISO < todayUK) return true;                  // any past day
+  if (dateISO > todayUK) return false;                 // any future day
+  // same day: compare HH:mm lexicographically
+  return timeHHMM < nowUK;
+}
+
+
 // --- Phone helpers (UK mobile) ---
 // Accepts "07XXXXXXXXX" or "+447XXXXXXXXX". Returns normalized E.164 ("+44XXXXXXXXXX") if valid, else null.
 function normalizeUKMobile(raw: string): string | null {
@@ -560,14 +595,16 @@ return;
               <h3 className="mb-3 text-brown font-semibold">{section}</h3>
               <div className="grid grid-cols-4 gap-3 sm:grid-cols-6">
                 {list.map((t) => {
+  const isPast = isSlotInPast(selectedDate, t);  // ⬅️ added
   const active = selectedTime === t;
   const isValid = available.includes(t); // only these can fit a 45-min booking
+
 
   return (
     <button
       key={t}
       type="button"
-      disabled={!isValid || pending}
+      disabled={!isValid || pending || isPast}
       onClick={async () => {
         if (!isValid) return;
 
@@ -605,12 +642,12 @@ return;
         }
       }}
       className={`rounded-xl border px-3 py-2 text-sm transition
-        ${!isValid
-          ? 'bg-white border-brown/10 text-brown/30 cursor-not-allowed'
-          : active
-            ? 'bg-brown text-ivory border-brown'
-            : 'bg-white border-brown/20 text-brown hover:border-brown/40'
-        }`}
+        ${(!isValid || isPast)
+  ? 'bg-white border-brown/10 text-brown/30 cursor-not-allowed'
+  : active
+    ? 'bg-brown text-ivory border-brown'
+    : 'bg-white border-brown/20 text-brown hover:border-brown/40'
+}`}
     >
       {t}
     </button>
