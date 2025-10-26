@@ -63,6 +63,11 @@ const [authInProgress, setAuthInProgress] = useState(false);
   const FORCE_POPUP = 
     typeof window !== 'undefined' && window.location.host.endsWith('.github.dev');
 
+    // Prefer POPUP on production hosts to avoid redirect/cookie issues
+const POPUP_HOSTS = ['trimzi.web.app', 'www.trimzi.co.uk', 'trimzi.co.uk'];
+const USE_POPUP =
+  typeof window !== 'undefined' && POPUP_HOSTS.includes(window.location.host);
+
     // If a Google flow is already in progress (pre-redirect), keep overlay visible after we come back
 React.useEffect(() => {
   try {
@@ -149,7 +154,7 @@ try { sessionStorage.setItem('authInProgress', '1'); } catch {}
     console.log('[Auth] handleGoogle: currentUser:', current?.uid, { isAnonymous: current?.isAnonymous });
 
     try {
-      if (FORCE_POPUP) {
+       if (FORCE_POPUP || USE_POPUP) {
         // ✅ On github.dev use POPUP first (redirect loses state)
         if (current && current.isAnonymous) {
           console.log('[Auth] linkWithPopup -> Google (upgrade anon)');
@@ -175,9 +180,9 @@ try { sessionStorage.setItem('authInProgress', '1'); } catch {}
       console.warn('[Auth] primary flow failed, falling back. code=', err?.code, 'message=', err?.message);
 
       // Fallback: if popup failed on non-github hosts, try redirect; if redirect failed on github, surface error.
-      if (FORCE_POPUP) {
-        throw err; // on github.dev we don't attempt redirect fallback
-      } else {
+        if (FORCE_POPUP || USE_POPUP) {
+    throw err; // on popup-only hosts we don't attempt redirect fallback
+  } else {
         if (current && current.isAnonymous) {
           console.log('[Auth] (fallback) linkWithRedirect -> Google (upgrade anon)');
           await linkWithRedirect(current, googleProvider);
