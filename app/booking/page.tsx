@@ -365,6 +365,10 @@ async function submitBookingWith(customerName: string, customerPhone: string, no
     end.setMinutes(end.getMinutes() + durationMins);
     const endISO = end.toISOString();
 
+// Determine attendee email from the current user (only if not anonymous)
+const uForEmail = auth.currentUser;
+const attendeeEmail = uForEmail && !uForEmail.isAnonymous ? (uForEmail.email ?? null) : null;
+
     // POST to your API route
     const res = await fetch('/api/bookings', {
       method: 'POST',
@@ -373,7 +377,7 @@ async function submitBookingWith(customerName: string, customerPhone: string, no
         summary: serviceName ?? 'Trimzi Booking',
         description: `Booked via Trimzi — Barber: ${barber || 'Ian'}`,
         startISO,                     // server still enforces 45m
-        attendeeEmail: null,
+        attendeeEmail,
         barberName: barber || 'Ian',
         customerName,
         customerPhone,

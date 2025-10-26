@@ -4,10 +4,16 @@ import { getCalendar, CALENDAR_ID, TZ } from '@lib/googleCalendar';
 import { assertEnv } from '@lib/assertEnv';
 import { adminDb } from '@lib/firebaseAdmin';
 import { addMinutes, fetchBusyIntervals, overlaps } from '@lib/availability';
+import sgMail from '@sendgrid/mail';
 
 export async function POST(req: Request) {
   try {
     assertEnv('GOOGLE_CALENDAR_ID');
+
+    // Init SendGrid if configured (safe no-op if missing in dev)
+if (process.env.SENDGRID_API_KEY) {
+  sgMail.setApiKey(process.env.SENDGRID_API_KEY);
+}
 
     const body = await req.json();
     const {
@@ -109,26 +115,73 @@ if (conflict) {
   noteText ? `Note from customer: ${noteText}` : null,
 ].filter(Boolean).join('\n');
 
-    const event = {
-      summary: customerName ? `${summary} — ${customerName}` : summary,
-      description: prettyDesc,
-      start: { dateTime: start.toISOString(), timeZone: TZ },
-      end:   { dateTime: endISO,            timeZone: TZ },
-      attendees: attendeeEmail ? [{ email: attendeeEmail }] : undefined,
-      reminders: { useDefault: true },
-      extendedProperties: {
-        private: { customerName: customerName || '', customerPhone: customerPhone || '' },
-      },
-      transparency: 'opaque',
-    } as const;
+   // Build Google Calendar event (no attendees to avoid service account invite error)
+const event = {
+  summary: customerName ? `${summary} — ${customerName}` : summary,
+  description: prettyDesc,
+  start: { dateTime: start.toISOString(), timeZone: TZ },
+  end:   { dateTime: endISO,             timeZone: TZ },
+  reminders: { useDefault: true },
+  extendedProperties: {
+    private: { customerName: customerName || '', customerPhone: customerPhone || '' },
+  },
+  transparency: 'opaque',
+} as const;
 
     const res = await calendar.events.insert({
       calendarId: CALENDAR_ID,
       requestBody: event,
-      sendUpdates: attendeeEmail ? 'all' : 'none',
+      sendUpdates: 'none',
     });
 
     if (holdId) await adminDb.collection('holds').doc(holdId).delete().catch(() => {});
+
+    // Send customer confirmation email via SendGrid (only if we have an email & key)
+try {
+  if (process.env.SENDGRID_API_KEY && process.env.SENDGRID_FROM && attendeeEmail) {
+    const when = new Date(startISO).toLocaleString('en-GB', {
+      timeZone: TZ,
+      weekday: 'long',
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+    });
+
+    const safeService = summary || 'Trimzi Booking';
+    const safeBarber = barberName || 'Ian';
+
+    await sgMail.send({
+      to: attendeeEmail,
+      from: process.env.SENDGRID_FROM,
+      subject: `Your Trimzi booking is confirmed — ${when}`,
+      html: `
+        <div style="font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;line-height:1.5;color:#2b2b2b">
+          <h2 style="margin:0 0 12px">Booking confirmed 🎉</h2>
+          <p style="margin:0 0 12px">Hi${customerName ? ' ' + customerName : ''},</p>
+          <p style="margin:0 0 12px">Your booking is confirmed:</p>
+          <ul style="margin:0 0 12px;padding-left:18px">
+            <li><strong>Service:</strong> ${safeService}</li>
+            <li><strong>Barber:</strong> ${safeBarber}</li>
+            <li><strong>When:</strong> ${when} (${TZ})</li>
+            ${customerPhone ? `<li><strong>Phone on file:</strong> ${customerPhone}</li>` : ''}
+          </ul>
+          ${
+            noteText
+              ? `<p style="margin:0 0 12px"><strong>Your note:</strong> ${String(noteText).replace(/</g,'&lt;')}</p>`
+              : ''
+          }
+          <p style="margin:16px 0 0">If you need to change this booking, please contact the shop directly.</p>
+          <p style="margin:8px 0 0">— Trimzi</p>
+        </div>
+      `,
+    });
+  }
+} catch (e) {
+  // Never fail the booking because email failed
+  console.warn('SendGrid email failed:', e);
+}
 
     return NextResponse.json({ ok: true, eventId: res.data.id, htmlLink: res.data.htmlLink });
   } catch (err: any) {
