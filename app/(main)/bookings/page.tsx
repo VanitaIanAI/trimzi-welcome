@@ -11,6 +11,8 @@ import {
   query,
   limit,
   type DocumentData,
+  deleteDoc,
+  doc,
 } from 'firebase/firestore';
 import { auth, db } from '../../../lib/firebaseClient'; // NOTE: 3x ".." from (main)/bookings
 
@@ -30,6 +32,9 @@ export default function BookingsPage() {
   const [authReady, setAuthReady] = useState(false);
   const [loading, setLoading] = useState(true);
   const [items, setItems] = useState<Booking[]>([]);
+  // add alongside: const [user], [authReady], [loading], [items], etc.
+const [cancellingId, setCancellingId] = useState<string | null>(null);
+
 
   // Track auth state
   useEffect(() => {
@@ -181,22 +186,88 @@ export default function BookingsPage() {
                         */}
 
                       </div>
-                      <div className="flex flex-col items-end gap-2 shrink-0">
-                        <Link
-  href={{
-    pathname: '/booking',
-    query: {
-      name: b.serviceName,
-      price: typeof b.price === 'number' ? b.price : undefined,
-      barber: b.barberName ?? 'Ian', // 👈 NEW: preselect barber (default to Ian)
-      durationMins: undefined,
-    },
-  }}
-  className="text-sm px-3 py-1 rounded-md bg-brown text-white hover:opacity-90"
->
-  Rebook
-</Link>
-                      </div>
+                     <div className="flex flex-col items-end gap-2 shrink-0">
+  {/* Rebook button – unchanged, but disabled while this booking is cancelling */}
+  <Link
+    href={{
+      pathname: '/booking',
+      query: {
+        name: b.serviceName,
+        price: typeof b.price === 'number' ? b.price : undefined,
+        barber: b.barberName ?? 'Ian',
+        durationMins: undefined,
+      },
+    }}
+    aria-disabled={cancellingId === b.id}
+    tabIndex={cancellingId === b.id ? -1 : 0}
+    className={`text-sm px-3 py-1 rounded-md text-white hover:opacity-90
+      ${cancellingId === b.id ? 'bg-brown/50 cursor-not-allowed' : 'bg-brown'}
+    `}
+  >
+    Rebook
+  </Link>
+
+  {/* Cancel button – shows spinner + disables while cancelling */}
+  <button
+    disabled={cancellingId === b.id}
+    className={`text-sm px-3 py-1 rounded-md border text-red-700
+      ${cancellingId === b.id
+        ? 'border-red-200 bg-red-50 cursor-not-allowed'
+        : 'border-red-300 hover:bg-red-50'
+      }`}
+    onClick={async () => {
+      try {
+        if (!confirm('Cancel this appointment? This cannot be undone.')) return;
+
+        setCancellingId(b.id);
+
+        // use explicit eventId if available, else doc ID fallback
+        const eventId =
+          b.htmlLink?.match(/eventid=([^&]+)/i)?.[1] || b.id;
+
+        const res = await fetch('/api/cancel', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ eventId }),
+        });
+        const json = await res.json().catch(() => ({}));
+
+        if (!res.ok || !json?.ok) {
+          alert(json?.error || 'Cancellation failed. Please try again.');
+          return;
+        }
+
+        // Also remove from the user's Firestore "bookings" list immediately
+        // (the realtime listener will keep things consistent)
+        try {
+          const u = auth.currentUser;
+          if (u && !u.isAnonymous) {
+            const { doc, deleteDoc } = await import('firebase/firestore');
+            await deleteDoc(doc(db, 'users', u.uid, 'bookings', b.id));
+          }
+        } catch (e) {
+          console.warn('Local Firestore removal failed; listener will catch up:', e);
+        }
+
+        alert('Booking cancelled.');
+      } catch (e) {
+        console.error(e);
+        alert('Error cancelling booking.');
+      } finally {
+        setCancellingId(null);
+      }
+    }}
+  >
+    {cancellingId === b.id ? (
+      <span className="inline-flex items-center gap-2">
+        <span className="h-3 w-3 rounded-full border-2 border-red-300 border-t-red-600 animate-spin" />
+        Cancelling…
+      </span>
+    ) : (
+      'Cancel'
+    )}
+  </button>
+</div>
                     </li>
                   ))}
                 </ul>
