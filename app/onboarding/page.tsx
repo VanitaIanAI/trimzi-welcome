@@ -52,6 +52,7 @@ export default function Onboarding() {
   const disabled = pending;
   const [showPassword, setShowPassword] = useState(false);
   const [showGuestModal, setShowGuestModal] = useState(false);
+  const [showAppNotice, setShowAppNotice] = useState(false);
   // Show a blocking overlay across the redirect round-trip
 const [authInProgress, setAuthInProgress] = useState(false);
 
@@ -73,6 +74,14 @@ React.useEffect(() => {
   try {
     if (typeof window !== 'undefined' && sessionStorage.getItem('authInProgress') === '1') {
       setAuthInProgress(true);
+    }
+  } catch {}
+}, []);
+
+React.useEffect(() => {
+  try {
+    if (typeof window !== 'undefined' && !sessionStorage.getItem('appNoticeShown')) {
+      setShowAppNotice(true);
     }
   } catch {}
 }, []);
@@ -532,6 +541,51 @@ const handleGuest = async () => {
           </form>
         )}
       </div>
+    
+    {/* One-time informational modal (shows once per browser session) */}
+{showAppNotice && (
+  <div className="fixed inset-0 z-50 flex items-center justify-center">
+    {/* backdrop */}
+    <div
+      className="absolute inset-0 bg-black/40"
+      onClick={() => {
+        try { sessionStorage.setItem('appNoticeShown', '1'); } catch {}
+        setShowAppNotice(false);
+      }}
+      aria-hidden="true"
+    />
+    {/* dialog */}
+    <div
+      role="dialog"
+      aria-modal="true"
+      className="relative w-[92%] max-w-md bg-white rounded-2xl shadow-xl border border-brown/10 p-5"
+    >
+      <h2 className="text-brown text-lg font-semibold mb-2">Heads up — TrimZi is in active development</h2>
+      <p className="text-brown/80 text-sm">
+        We’re rolling out features over the next few weeks. Online payments are coming soon,
+        and we’d love your feedback in the meantime.
+      </p>
+      <p className="text-brown/70 text-xs mt-2">
+        Tap anywhere outside this box or “Got it” to continue.
+      </p>
+
+      <div className="mt-5 flex justify-end">
+        <button
+          type="button"
+          className="h-11 rounded-xl px-4 border border-brown/20 text-brown hover:bg-ivory/80"
+          onClick={() => {
+            try { sessionStorage.setItem('appNoticeShown', '1'); } catch {}
+            setShowAppNotice(false);
+          }}
+        >
+          Got it
+        </button>
+      </div>
+    </div>
+  </div>
+)}
+
+
     {/* Guest info modal */}
 {showGuestModal && (
   <div className="fixed inset-0 z-50 flex items-center justify-center">

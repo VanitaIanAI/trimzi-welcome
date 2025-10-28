@@ -1,11 +1,12 @@
-// app/cancel/page.tsx
 'use client';
 
-import { useEffect, useState } from 'react';
+// app/cancel/page.tsx
+
+import { useEffect, useState, Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 
-export default function CancelPage() {
+function CancelInner() {
   const searchParams = useSearchParams();
   const token = searchParams.get('token');
   const [status, setStatus] = useState<'idle' | 'working' | 'success' | 'error'>('idle');
@@ -87,5 +88,25 @@ export default function CancelPage() {
         </div>
       </main>
     </div>
+  );
+}
+
+export default function CancelPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="min-h-dvh bg-ivory">
+          <main className="mx-auto max-w-[720px] px-4 py-10">
+            <h1 className="text-brown text-2xl font-bold mb-4">Cancel booking</h1>
+            <div className="rounded-xl bg-white border border-brown/10 p-5 flex items-center gap-3">
+              <div className="h-5 w-5 rounded-full border-2 border-brown/20 border-t-brown animate-spin" />
+              <p className="text-brown">Loading…</p>
+            </div>
+          </main>
+        </div>
+      }
+    >
+      <CancelInner />
+    </Suspense>
   );
 }

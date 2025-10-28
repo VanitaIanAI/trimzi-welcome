@@ -1,3 +1,5 @@
+export const dynamic = 'force-dynamic';
+
 import { NextResponse } from 'next/server';
 import { getCalendar, CALENDAR_ID } from '@lib/googleCalendar';
 import { adminDb } from '@lib/firebaseAdmin';
