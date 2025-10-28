@@ -1,4 +1,7 @@
 'use client';
+
+// app/booking/page.tsx
+
 export const dynamic = 'force-dynamic';
 
 import React, { useMemo, useState, useEffect, Suspense } from 'react';
@@ -188,6 +191,7 @@ const [loadingAvail, setLoadingAvail] = useState(false);
 const [showContactModal, setShowContactModal] = useState(false);
 const [contactName, setContactName] = useState('');
 const [contactPhone, setContactPhone] = useState('');
+const [contactEmail, setContactEmail] = useState('');
 const [savingContact, setSavingContact] = useState(false);
 
 // --- Optional "note to barber" modal state ---
@@ -255,7 +259,7 @@ function buildCalendarLinks(opts: {
 
 
 // we’ll stash the name/phone we’re going to submit with, then ask for the note
-const [pendingContact, setPendingContact] = useState<{ name: string; phone: string } | null>(null);
+const [pendingContact, setPendingContact] = useState<{ name: string; phone: string; email?: string } | null>(null);
 
 
   // Start time differs for Saturday
@@ -355,7 +359,7 @@ async function getCustomerDetails() {
   return { customerName, customerPhone };
 }
 
-async function submitBookingWith(customerName: string, customerPhone: string, note: string = '') {
+async function submitBookingWith(customerName: string, customerPhone: string, note: string = '', attendeeEmailOverride?: string | null) {
   setPending(true);
   try {
     // Build start/end ISO strings (your booking is always 45m – we keep your current derivation)
@@ -367,7 +371,8 @@ async function submitBookingWith(customerName: string, customerPhone: string, no
 
 // Determine attendee email from the current user (only if not anonymous)
 const uForEmail = auth.currentUser;
-const attendeeEmail = uForEmail && !uForEmail.isAnonymous ? (uForEmail.email ?? null) : null;
+const attendeeEmail =
+  uForEmail && !uForEmail.isAnonymous ? (uForEmail.email ?? null) : (attendeeEmailOverride ?? null);
 
     // POST to your API route
     const res = await fetch('/api/bookings', {
@@ -481,7 +486,7 @@ async function handleBook() {
   }
 
 // We have a phone already – ask for an optional note before submitting
-setPendingContact({ name: existingName, phone: existingPhone });
+setPendingContact({ name: existingName, phone: existingPhone, email: contactEmail });
 setShowNoteModal(true);
 return;
 
@@ -676,7 +681,7 @@ return;
     <div className="relative w-full sm:max-w-md bg-white rounded-t-2xl sm:rounded-2xl shadow-xl border border-brown/10 p-5 mx-auto">
       <h2 className="text-brown text-lg font-semibold mb-2">Contact details required</h2>
       <p className="text-brown/80 text-sm mb-4">
-        No login needed to make a booking, but we need a contact name and number in case the barber needs to reach you.
+        No login needed to make a booking, but we need an email address to confirm your booking and contact name and number in case the barber needs to reach you.
       </p>
 
       <div className="space-y-3">
@@ -702,6 +707,17 @@ return;
   aria-invalid={contactPhone ? !looksLikeUKMobile(contactPhone) : undefined}
 />
         </div>
+        <div>
+  <label className="block text-sm mb-1">Email address</label>
+  <input
+    type="email"
+    className="w-full rounded-md border border-brown/20 bg-ivory px-3 py-2 text-sm"
+    value={contactEmail}
+    onChange={(e) => setContactEmail(e.target.value)}
+    placeholder="you@example.com"
+    required
+  />
+</div>
       </div>
 
       <div className="mt-5 flex gap-3">
@@ -717,6 +733,11 @@ return;
     return;
   }
 
+  if (!contactEmail || !contactEmail.includes('@')) {
+  alert('Please enter a valid email address.');
+  return;
+}
+
   setSavingContact(true);
   try {
     const u = auth.currentUser;
@@ -731,7 +752,7 @@ return;
     setShowContactModal(false);
 
     // After we have contact details, ask for an optional note
-    setPendingContact({ name: contactName.trim(), phone: normalized });
+    setPendingContact({ name: contactName.trim(), phone: normalized, email: contactEmail.trim() });
     setShowNoteModal(true);
   } catch (e) {
     console.error(e);
@@ -766,7 +787,7 @@ return;
       onClick={() => {
         // clicking backdrop = skip
         setShowNoteModal(false);
-        submitBookingWith(pendingContact.name, pendingContact.phone, '');
+        submitBookingWith(pendingContact.name, pendingContact.phone, '', pendingContact.email || null);
         setPendingContact(null);
       }}
     />
@@ -801,7 +822,7 @@ return;
           onClick={() => {
             // skip note
             setShowNoteModal(false);
-            submitBookingWith(pendingContact.name, pendingContact.phone, '');
+            submitBookingWith(pendingContact.name, pendingContact.phone, '', pendingContact.email || null);
             setPendingContact(null);
             setNoteText('');
           }}
@@ -814,7 +835,7 @@ return;
           className="flex-1 h-12 rounded-xl bg-brown text-white font-semibold hover:bg-brown/90"
           onClick={() => {
             setShowNoteModal(false);
-            submitBookingWith(pendingContact.name, pendingContact.phone, noteText.trim());
+            submitBookingWith(pendingContact.name, pendingContact.phone, noteText.trim(), pendingContact.email || null);
             setPendingContact(null);
             setNoteText('');
           }}
