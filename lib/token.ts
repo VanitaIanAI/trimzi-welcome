@@ -1,3 +1,5 @@
+//lib/token.ts
+
 import crypto from 'crypto';
 
 const SECRET = process.env.CANCEL_TOKEN_SECRET!;
