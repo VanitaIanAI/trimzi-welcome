@@ -417,6 +417,7 @@ const attendeeEmail =
             source: 'web',
             status: 'upcoming',
             htmlLink: json.htmlLink ?? null,
+            eventId: json.eventId ?? null,
             createdAt: serverTimestamp(),
             note: note ? note : null,
           },
