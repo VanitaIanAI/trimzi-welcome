@@ -5,6 +5,7 @@ import { assertEnv } from '@lib/assertEnv';
 import { adminDb } from '@lib/firebaseAdmin';
 import { addMinutes, fetchBusyIntervals, overlaps } from '@lib/availability';
 import sgMail from '@sendgrid/mail';
+import { signCancelToken } from '@lib/token';
 
 export async function POST(req: Request) {
   try {
@@ -134,6 +135,8 @@ const event = {
       sendUpdates: 'none',
     });
 
+    const eventId = typeof res.data.id === 'string' && res.data.id ? res.data.id : crypto.randomUUID();
+
     if (holdId) await adminDb.collection('holds').doc(holdId).delete().catch(() => {});
 
     // Send customer confirmation email via SendGrid (only if we have an email & key)
@@ -151,6 +154,9 @@ try {
 
     const safeService = summary || 'Trimzi Booking';
     const safeBarber = barberName || 'Ian';
+
+const cancelToken = signCancelToken({ eventId: eventId });
+const cancelUrl = `${process.env.APP_BASE_URL || 'https://trimzi.co.uk'}/cancel?token=${cancelToken}`;
 
     await sgMail.send({
       to: attendeeEmail,
@@ -172,6 +178,12 @@ try {
               ? `<p style="margin:0 0 12px"><strong>Your note:</strong> ${String(noteText).replace(/</g,'&lt;')}</p>`
               : ''
           }
+          <p style="margin:12px 0">
+  <a href="${cancelUrl}" style="color:#c00;font-weight:bold;text-decoration:underline;">
+    Cancel this booking
+  </a>
+</p>
+          
           <p style="margin:16px 0 0">If you need to change this booking, please contact the shop directly.</p>
           <p style="margin:8px 0 0">— Trimzi</p>
         </div>
@@ -183,7 +195,7 @@ try {
   console.warn('SendGrid email failed:', e);
 }
 
-    return NextResponse.json({ ok: true, eventId: res.data.id, htmlLink: res.data.htmlLink });
+    return NextResponse.json({ ok: true, eventId: eventId, htmlLink: res.data.htmlLink });
   } catch (err: any) {
     console.error(err);
     return NextResponse.json({ error: err?.message ?? 'Unknown error' }, { status: 500 });
