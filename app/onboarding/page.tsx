@@ -564,6 +564,8 @@ const handleGuest = async () => {
       <p className="text-brown/80 text-sm">
         We’re rolling out features over the next few weeks. Online payments are coming soon,
         and we’d love your feedback in the meantime.
+
+        Don't stress about the various options, a simple click on 'search' will take you to the Kelvinhair page.
       </p>
       <p className="text-brown/70 text-xs mt-2">
         Tap anywhere outside this box or “Got it” to continue.
