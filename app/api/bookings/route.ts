@@ -6,6 +6,7 @@ import { adminDb } from '@lib/firebaseAdmin';
 import { addMinutes, fetchBusyIntervals, overlaps } from '@lib/availability';
 import sgMail from '@sendgrid/mail';
 import { signCancelToken } from '@lib/token';
+import { randomUUID } from 'crypto';
 
 export async function POST(req: Request) {
   try {
@@ -135,7 +136,7 @@ const event = {
       sendUpdates: 'none',
     });
 
-    const eventId = typeof res.data.id === 'string' && res.data.id ? res.data.id : crypto.randomUUID();
+    const eventId = typeof res.data.id === 'string' && res.data.id ? res.data.id : randomUUID();
 
     if (holdId) await adminDb.collection('holds').doc(holdId).delete().catch(() => {});
 
@@ -193,6 +194,58 @@ const cancelUrl = `${process.env.APP_BASE_URL || 'https://trimzi.co.uk'}/cancel?
 } catch (e) {
   // Never fail the booking because email failed
   console.warn('SendGrid email failed:', e);
+}
+
+// --- ClickSend SMS alert (owner notification) ---
+try {
+  if (
+    process.env.CLICKSEND_USERNAME &&
+    process.env.CLICKSEND_API_KEY &&
+    process.env.ALERT_SMS_TO &&
+    process.env.SMS_SENDER
+  ) {
+    // Build a short when-string for SMS
+    const whenSms = new Date(startISO).toLocaleString('en-GB', {
+      timeZone: TZ,
+      weekday: 'short',
+      day: '2-digit',
+      month: 'short',
+      hour: '2-digit',
+      minute: '2-digit',
+    });
+
+    // Compose the SMS body
+    const bodyText = `New booking: ${summary || 'Service'} with ${barberName || 'Ian'} at ${whenSms}.`
+      + (customerName ? ` Customer: ${customerName}.` : '')
+      + (customerPhone ? ` Phone: ${customerPhone}.` : '');
+
+    const payload = {
+      messages: [
+        {
+          source: 'trimzi-app',
+          body: bodyText,
+          to: process.env.ALERT_SMS_TO,     // e.g. +447900473307
+          from: process.env.SMS_SENDER,     // e.g. +447900473307 (verified in ClickSend)
+        },
+      ],
+    };
+
+    const authB64 = Buffer
+      .from(`${process.env.CLICKSEND_USERNAME}:${process.env.CLICKSEND_API_KEY}`)
+      .toString('base64');
+
+    await fetch('https://rest.clicksend.com/v3/sms/send', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Basic ${authB64}`,
+      },
+      body: JSON.stringify(payload),
+    });
+  }
+} catch (e) {
+  // Never fail the booking because SMS failed
+  console.warn('ClickSend SMS failed:', e);
 }
 
     return NextResponse.json({ ok: true, eventId: eventId, htmlLink: res.data.htmlLink });
