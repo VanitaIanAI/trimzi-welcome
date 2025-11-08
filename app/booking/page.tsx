@@ -186,6 +186,7 @@ const [available, setAvailable] = useState<string[]>([]);
 const [holdId, setHoldId] = useState<string | null>(null);
 const [holdExpiry,setHoldExpiry] = useState<number | null>(null);
 const [loadingAvail, setLoadingAvail] = useState(false);
+const [showAllSlots, setShowAllSlots] = useState(false);
 
 // --- Contact details modal state (for users without phone) ---
 const [showContactModal, setShowContactModal] = useState(false);
@@ -581,6 +582,20 @@ return;
           </div>
         </section>
 
+           {/* Toggle: Show all times vs only available */}
+        {OPEN_DAYS.includes(dayIdx as any) && barber && (
+          <div className="mt-4 flex items-center justify-end">
+            <button
+              type="button"
+              onClick={() => setShowAllSlots(v => !v)}
+              className="text-sm rounded-md px-3 py-1 border border-brown/20 text-brown hover:bg-brown/5"
+            >
+              {showAllSlots ? 'Show available only' : 'Show all times'}
+            </button>
+          </div>
+        )}
+
+
         {/* Closed day message */}
         {!OPEN_DAYS.includes(dayIdx as any) ? (
           <p className="mt-6 text-brown/70 text-sm">No slots: we're closed on {weekdayLabel(selectedDate)}.</p>
@@ -596,73 +611,82 @@ return;
   </div>
 )}
 
-        {/* Sections */}
+         {/* Sections */}
         {(['Morning','Midday / Afternoon','Afternoon / Evening'] as const).map((section) => {
           const list = (sections as any)[section] as string[];
           if (!list?.length) return null;
+
+          // Decide which times to display:
+          // - Default: only show *available* and *not in the past*
+          // - If toggle is ON (showAllSlots), show everything (disabled ones stay disabled)
+          const displayList = showAllSlots
+            ? list
+            : list.filter((t) => available.includes(t) && !isSlotInPast(selectedDate, t));
+
+          if (!displayList.length) return null;
+
           return (
             <section key={section} className="mt-6">
               <h3 className="mb-3 text-brown font-semibold">{section}</h3>
               <div className="grid grid-cols-4 gap-3 sm:grid-cols-6">
-                {list.map((t) => {
-  const isPast = isSlotInPast(selectedDate, t);  // ⬅️ added
-  const active = selectedTime === t;
-  const isValid = available.includes(t); // only these can fit a 45-min booking
+                {displayList.map((t) => {
+                  const isPast = isSlotInPast(selectedDate, t);
+                  const active = selectedTime === t;
+                  const isValid = available.includes(t); // fits a 45-min booking
 
+                  return (
+                    <button
+                      key={t}
+                      type="button"
+                      disabled={!isValid || pending || isPast}
+                      onClick={async () => {
+                        if (!isValid || isPast) return;
 
-  return (
-    <button
-      key={t}
-      type="button"
-      disabled={!isValid || pending || isPast}
-      onClick={async () => {
-        if (!isValid) return;
+                        // release previous hold (if any)
+                        if (holdId) {
+                          try { await fetch(`/api/holds?holdId=${encodeURIComponent(holdId)}`, { method: 'DELETE' }); } catch {}
+                          setHoldId(null);
+                          setHoldExpiry(null);
+                        }
 
-        // release previous hold (if any)
-        if (holdId) {
-          try { await fetch(`/api/holds?holdId=${encodeURIComponent(holdId)}`, { method: 'DELETE' }); } catch {}
-          setHoldId(null);
-          setHoldExpiry(null);
-        }
+                        setSelectedTime(t);
 
-        setSelectedTime(t);
-
-        try {
-          const res = await fetch('/api/holds', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ date: selectedDate, time: t, barber }),
-          });
-          const json = await res.json();
-          if (!res.ok || !json.ok) {
-            alert(json.reason || 'That slot just went unavailable.');
-            // refresh availability
-            const r2 = await fetch(`/api/availability?date=${selectedDate}&barber=${encodeURIComponent(barber)}`);
-            const j2 = await r2.json();
-            setAvailable(j2.available || []);
-            setSelectedTime(null);
-            return;
-          }
-          setHoldId(json.holdId);
-          setHoldExpiry(Date.parse(json.expiresAt)); // for a countdown if you want
-        } catch (e) {
-          console.error(e);
-          alert('Could not reserve the slot. Please try again.');
-          setSelectedTime(null);
-        }
-      }}
-      className={`rounded-xl border px-3 py-2 text-sm transition
-        ${(!isValid || isPast)
-  ? 'bg-white border-brown/10 text-brown/30 cursor-not-allowed'
-  : active
-    ? 'bg-brown text-ivory border-brown'
-    : 'bg-white border-brown/20 text-brown hover:border-brown/40'
-}`}
-    >
-      {t}
-    </button>
-  );
-})}
+                        try {
+                          const res = await fetch('/api/holds', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ date: selectedDate, time: t, barber }),
+                          });
+                          const json = await res.json();
+                          if (!res.ok || !json.ok) {
+                            alert(json.reason || 'That slot just went unavailable.');
+                            // refresh availability
+                            const r2 = await fetch(`/api/availability?date=${selectedDate}&barber=${encodeURIComponent(barber)}`);
+                            const j2 = await r2.json();
+                            setAvailable(j2.available || []);
+                            setSelectedTime(null);
+                            return;
+                          }
+                          setHoldId(json.holdId);
+                          setHoldExpiry(Date.parse(json.expiresAt));
+                        } catch (e) {
+                          console.error(e);
+                          alert('Could not reserve the slot. Please try again.');
+                          setSelectedTime(null);
+                        }
+                      }}
+                      className={`rounded-xl border px-3 py-2 text-sm transition
+                        ${(!isValid || isPast)
+                          ? 'bg-white border-brown/10 text-brown/30 cursor-not-allowed'
+                          : active
+                            ? 'bg-brown text-ivory border-brown'
+                            : 'bg-white border-brown/20 text-brown hover:border-brown/40'
+                        }`}
+                    >
+                      {t}
+                    </button>
+                  );
+                })}
               </div>
             </section>
           );

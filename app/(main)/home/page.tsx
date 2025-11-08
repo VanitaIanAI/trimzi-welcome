@@ -111,29 +111,46 @@ export default function HomePage() {
           </div>
         </div>
 
-        {/* Tabs */}
-        <div className="flex gap-2">
-          <button
-            onClick={() => setTab('services')}
-            className={`px-3 py-1 rounded-full border ${
-              tab === 'services'
-                ? 'bg-brown text-white border-brown'
-                : 'border-brown/30 text-brown'
-            }`}
-          >
-            Services
-          </button>
-          <button
-            onClick={() => setTab('salon')}
-            className={`px-3 py-1 rounded-full border ${
-              tab === 'salon'
-                ? 'bg-brown text-white border-brown'
-                : 'border-brown/30 text-brown'
-            }`}
-          >
-            Salon
-          </button>
-        </div>
+        <div className="flex items-center justify-between">
+  {/* Left: existing tabs */}
+  <div className="flex gap-2">
+    <button
+      onClick={() => setTab('services')}
+      className={`px-3 py-1 rounded-full border ${
+        tab === 'services'
+          ? 'bg-brown text-white border-brown'
+          : 'border-brown/30 text-brown'
+      }`}
+    >
+      Services
+    </button>
+    <button
+      onClick={() => setTab('salon')}
+      className={`px-3 py-1 rounded-full border ${
+        tab === 'salon'
+          ? 'bg-brown text-white border-brown'
+          : 'border-brown/30 text-brown'
+      }`}
+    >
+      Salon
+    </button>
+  </div>
+
+  {/* Right: quick link to Kelvinhair */}
+  <Link
+    href="/kelvinhair"
+    className="shrink-0 group inline-flex items-center gap-2 px-3 py-1 rounded-full border border-brown/30 text-brown hover:border-brown hover:bg-brown/5 transition"
+    aria-label="Go to Kelvinhair"
+  >
+    {/* simple star badge */}
+    <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-brown text-white text-[10px] font-semibold">
+      ★
+    </span>
+    <span className="text-sm font-medium">Most popular: Kelvinhair</span>
+  </Link>
+</div>
+
+
 
         {/* Inputs */}
         <div className="space-y-4">
