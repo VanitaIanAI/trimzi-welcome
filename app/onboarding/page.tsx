@@ -20,6 +20,7 @@ import {
   linkWithPopup,
   linkWithRedirect,
   GoogleAuthProvider,
+  signInWithCredential,
   User,
   UserCredential,
   sendPasswordResetEmail,
@@ -109,9 +110,27 @@ React.useEffect(() => {
 
   window.location.assign('/home');
 }
-    } catch (e) {
-      console.warn('[Auth] getRedirectResult threw:', e);
+    } catch (e: any) {
+  console.warn('[Auth] getRedirectResult threw:', e?.code || e, e);
+
+  // ✅ Recover from old-session collisions
+  if (e?.code === 'auth/credential-already-in-use') {
+    const gc = GoogleAuthProvider.credentialFromError(e);
+    if (gc) {
+      // If an anonymous user is sitting around, sign it out before completing.
+      try { if (auth.currentUser?.isAnonymous) await auth.signOut(); } catch {}
+      const uc = await signInWithCredential(auth, gc);
+      await ensureProfile(uc.user.uid, {
+        name: uc.user.displayName ?? '',
+        email: uc.user.email ?? '',
+      });
+      try { sessionStorage.removeItem('authInProgress'); } catch {}
+      setAuthInProgress(false);
+      window.location.assign('/home');
+      return;
     }
+  }
+}
   })();
 }, [router]);
 
@@ -187,6 +206,24 @@ try { sessionStorage.setItem('authInProgress', '1'); } catch {}
       return; // page will navigate; getRedirectResult/onAuthStateChanged will handle it
     } catch (err: any) {
       console.warn('[Auth] primary flow failed, falling back. code=', err?.code, 'message=', err?.message);
+
+// ✅ If the failure is a credential collision, finish sign-in directly.
+if (err?.code === 'auth/credential-already-in-use') {
+  const gc = GoogleAuthProvider.credentialFromError(err);
+  if (gc) {
+    try { if (auth.currentUser?.isAnonymous) await auth.signOut(); } catch {}
+    const uc = await signInWithCredential(auth, gc);
+    await ensureProfile(uc.user.uid, {
+      name: uc.user.displayName ?? '',
+      email: uc.user.email ?? '',
+    });
+    try { sessionStorage.removeItem('authInProgress'); } catch {}
+    setAuthInProgress(false);
+    window.location.assign('/home');
+    return; // stop here; we’ve completed the flow
+  }
+}
+
 
       // Fallback: if popup failed on non-github hosts, try redirect; if redirect failed on github, surface error.
         if (FORCE_POPUP || USE_POPUP) {
