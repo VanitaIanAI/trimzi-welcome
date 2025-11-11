@@ -44,6 +44,13 @@ export default function ProfilePage() {
   const [authReady, setAuthReady] = useState(false);
   const [user, setUser] = useState<User | null>(null);
 
+  // render only after fields are set at least once
+  const [profileReady, setProfileReady] = useState(false);
+  // prevent first-paint flicker until client mounts
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => { setMounted(true); }, []);
+
+
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -90,7 +97,10 @@ export default function ProfilePage() {
       } catch {
         // swallow; form stays mostly blank apart from auth values
       } finally {
-        if (!cancelled) setLoading(false);
+        if (!cancelled) {
+          setProfileReady(true);   // ✅ fields are ready to show (even if from auth defaults)
+          setLoading(false);
+        }
       }
     }
 
@@ -189,13 +199,9 @@ export default function ProfilePage() {
     );
   }
 
-  // Loading
-  if (!authReady || loading) {
-    return (
-      <main className="mx-auto max-w-[720px] px-4 py-6">
-        <div className="text-brown/70">Loading profile…</div>
-      </main>
-    );
+    // Don’t render anything until the client is mounted, auth is known, and fields are populated at least once.
+  if (!mounted || !authReady || !profileReady) {
+    return null;
   }
 
   return (
@@ -204,9 +210,10 @@ export default function ProfilePage() {
 
     
 
-      {/* Announcements (optional) */}
-      {announcements.length > 0 && (
+            {/* Announcements (optional) – wait until profileReady to avoid layout shift */}
+      {profileReady && announcements.length > 0 && (
         <section className="rounded-xl border border-brown/10 bg-white">
+
           <div className="px-4 py-3 border-b border-brown/10">
             <h2 className="text-brown font-medium">Announcements</h2>
           </div>
