@@ -306,6 +306,17 @@ export default function ProfilePage() {
           </Link>
         </div>
       </form>
+      <section className="text-xs text-brown/60 space-y-1">
+        <p className="text-sm font-medium text-brown">Legal</p>
+        <div className="flex flex-wrap gap-3">
+          <Link href="/privacy" className="underline hover:no-underline">
+            Privacy Policy
+          </Link>
+          <Link href="/terms" className="underline hover:no-underline">
+            Terms of Use
+          </Link>
+        </div>
+      </section>
     </main>
   );
 }

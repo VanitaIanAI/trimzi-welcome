@@ -895,6 +895,18 @@ return;
             {pending ? 'Booking...' : 'Continue'}
           </button>
          
+               <p className="mt-3 text-xs text-brown/60 text-center">
+            By booking, you agree to our{' '}
+            <Link href="/terms" className="underline hover:no-underline">
+              Terms of Use
+            </Link>{' '}
+            and{' '}
+            <Link href="/privacy" className="underline hover:no-underline">
+              Privacy Policy
+            </Link>
+            .
+          </p>
+
         </div>
         
         {showConfirm && confirm && (

@@ -7,6 +7,7 @@ if (typeof window !== 'undefined') localStorage.setItem('firebase:log','true');
 import Image from 'next/image';
 import { useRouter } from 'next/navigation';
 import React, { useState } from 'react';
+import Link from 'next/link';
 
 import { auth, googleProvider, db } from '../../lib/firebaseClient';
 import {
@@ -435,6 +436,18 @@ const handleGuest = async () => {
             >
               Continue as Guest
             </button>
+             {/* Legal notice */}
+            <p className="mt-2 text-xs text-brown/60 text-center">
+              By continuing, you agree to our{' '}
+              <Link href="/terms" className="underline hover:no-underline">
+                Terms of Use
+              </Link>{' '}
+              and{' '}
+              <Link href="/privacy" className="underline hover:no-underline">
+                Privacy Policy
+              </Link>
+              .
+            </p>
           </div>
         ) : (
           <form
@@ -575,6 +588,17 @@ const handleGuest = async () => {
                 Back
               </button>
             </div>
+            <p className="mt-4 text-xs text-brown/60 text-center">
+              By continuing, you agree to our{' '}
+              <Link href="/terms" className="underline hover:no-underline">
+                Terms of Use
+              </Link>{' '}
+              and{' '}
+              <Link href="/privacy" className="underline hover:no-underline">
+                Privacy Policy
+              </Link>
+              .
+            </p>
           </form>
         )}
       </div>
