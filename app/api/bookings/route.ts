@@ -19,22 +19,48 @@ if (process.env.SENDGRID_API_KEY) {
 
     const body = await req.json();
     const {
-  summary,
-  description,
-  startISO,
-  attendeeEmail,
-  barberName,
-  customerName,
-  customerPhone,
-  holdId,
-  date,
-  // NEW:
-  noteText,
-} = body;
+      summary,
+      description,
+      startISO,
+      attendeeEmail,
+      barberName,
+      customerName,
+      customerPhone,
+      holdId,
+      date,
+      noteText,
+      // NEW: payment metadata (may be missing for older clients)
+      paymentMethod,
+      paymentStatus,
+    } = body as {
+      summary?: string;
+      description?: string;
+      startISO?: string;
+      attendeeEmail?: string | null;
+      barberName?: string | null;
+      customerName?: string | null;
+      customerPhone?: string | null;
+      holdId?: string | null;
+      date?: string;
+      noteText?: string | null;
+      paymentMethod?: 'pay_now' | 'pay_later';
+      paymentStatus?: 'unpaid' | 'paid' | 'partially_paid' | 'refunded';
+    };
 
     if (!summary || !startISO || !date) {
       return NextResponse.json({ error: 'summary, date and startISO are required' }, { status: 400 });
     }
+
+// Normalise payment metadata – older clients may not send it
+    const normalisedPaymentMethod: 'pay_now' | 'pay_later' =
+      paymentMethod === 'pay_now' ? 'pay_now' : 'pay_later';
+
+    const normalisedPaymentStatus: 'unpaid' | 'paid' | 'partially_paid' | 'refunded' =
+      paymentStatus === 'paid' ||
+      paymentStatus === 'partially_paid' ||
+      paymentStatus === 'refunded'
+        ? paymentStatus
+        : 'unpaid';
 
     // Always 45 minutes
     const start = new Date(startISO);
@@ -108,14 +134,16 @@ if (conflict) {
     const calendar = await getCalendar();
 
     const prettyDesc = [
-  description ?? `Booked via Trimzi${barberName ? ` · Barber: ${barberName}` : ''}`,
-  '',
-  customerName ? `Customer: ${customerName}` : null,
-  customerPhone ? `Phone: ${customerPhone}` : null,
-  summary ? `Service: ${summary}` : null,
-  noteText ? '' : null,
-  noteText ? `Note from customer: ${noteText}` : null,
-].filter(Boolean).join('\n');
+      description ?? `Booked via Trimzi${barberName ? ` · Barber: ${barberName}` : ''}`,
+      '',
+      customerName ? `Customer: ${customerName}` : null,
+      customerPhone ? `Phone: ${customerPhone}` : null,
+      summary ? `Service: ${summary}` : null,
+      `Payment method: ${normalisedPaymentMethod === 'pay_now' ? 'Pay online' : 'Pay on the day'}`,
+      `Payment status: ${normalisedPaymentStatus}`,
+      noteText ? '' : null,
+      noteText ? `Note from customer: ${noteText}` : null,
+    ].filter(Boolean).join('\n');
 
    // Build Google Calendar event (no attendees to avoid service account invite error)
 const event = {
@@ -124,8 +152,13 @@ const event = {
   start: { dateTime: start.toISOString(), timeZone: TZ },
   end:   { dateTime: endISO,             timeZone: TZ },
   reminders: { useDefault: true },
-  extendedProperties: {
-    private: { customerName: customerName || '', customerPhone: customerPhone || '' },
+   extendedProperties: {
+    private: {
+      customerName: customerName || '',
+      customerPhone: customerPhone || '',
+      paymentMethod: normalisedPaymentMethod,
+      paymentStatus: normalisedPaymentStatus,
+    },
   },
   transparency: 'opaque',
 } as const;
@@ -156,6 +189,23 @@ try {
     const safeService = summary || 'Trimzi Booking';
     const safeBarber = barberName || 'Ian';
 
+    const paymentMethodLabel =
+      normalisedPaymentMethod === 'pay_now' ? 'Pay online' : 'Pay on the day';
+
+    const cancellationPolicyHtml =
+      normalisedPaymentMethod === 'pay_now'
+        ? `
+          <p style="margin:12px 0 0;font-size:13px;color:#444;">
+            If you cancel more than 24 hours before your appointment, any online payment will normally be refunded.
+            Cancellations within 24 hours are <strong>not subject to automatic refund</strong> and any refund will be at your barber&apos;s discretion.
+          </p>
+        `
+        : `
+          <p style="margin:12px 0 0;font-size:13px;color:#444;">
+            You chose to pay on the day. Cancellations within 24 hours of your appointment may still be charged at your barber&apos;s discretion.
+          </p>
+        `;
+
 const cancelToken = signCancelToken({ eventId: eventId });
 const cancelUrl = `${process.env.APP_BASE_URL || 'https://trimzi.co.uk'}/cancel?token=${cancelToken}`;
 
@@ -172,6 +222,7 @@ const cancelUrl = `${process.env.APP_BASE_URL || 'https://trimzi.co.uk'}/cancel?
             <li><strong>Service:</strong> ${safeService}</li>
             <li><strong>Barber:</strong> ${safeBarber}</li>
             <li><strong>When:</strong> ${when} (${TZ})</li>
+            <li><strong>Payment:</strong> ${paymentMethodLabel}</li>
             ${customerPhone ? `<li><strong>Phone on file:</strong> ${customerPhone}</li>` : ''}
           </ul>
           ${
@@ -179,6 +230,8 @@ const cancelUrl = `${process.env.APP_BASE_URL || 'https://trimzi.co.uk'}/cancel?
               ? `<p style="margin:0 0 12px"><strong>Your note:</strong> ${String(noteText).replace(/</g,'&lt;')}</p>`
               : ''
           }
+          ${cancellationPolicyHtml}
+          <p style="margin:12px 0">
           <p style="margin:12px 0">
   <a href="${cancelUrl}" style="color:#c00;font-weight:bold;text-decoration:underline;">
     Cancel this booking

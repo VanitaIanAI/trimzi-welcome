@@ -112,6 +112,12 @@ export default function HomePage() {
         </div>
 
 
+ {/* Top trusted barbers */}
+        <section className="mt-2">
+          <h2 className="text-sm font-semibold text-brown/80">
+            Top trusted barbers
+          </h2>
+        </section>
 
          {/* Quick link to Kelvinhair (left-justified, own row, below hero) */}
         <div>
@@ -159,25 +165,34 @@ export default function HomePage() {
         <div className="space-y-4">
           <div>
             <label className="block text-brown/80 text-sm mb-1">Search</label>
-            <input
-              className="w-full rounded-xl border border-brown/20 px-4 h-12 bg-white/70"
-              placeholder={tab === 'services' ? 'Cut, beard, hot towel…' : 'Kelvin Hair…'}
-            />
+            <select
+              className="w-full rounded-xl border border-brown/20 px-4 h-12 bg-white/70 text-sm"
+              defaultValue=""
+            >
+              <option value="" disabled>
+                {tab === 'services' ? 'Choose a service' : 'Choose a service'}
+              </option>
+              <option value="mens-cut">Men&apos;s cut</option>
+              <option value="student-cut">Student cut</option>
+              <option value="clipper-cut">Clipper cut</option>
+              <option value="scissor-cut">Scissor cut</option>
+              <option value="boys-cut">Boy&apos;s cut</option>
+            </select>
           </div>
           <div>
             <label className="block text-brown/80 text-sm mb-1">Location</label>
-            <input
-              className="w-full rounded-xl border border-brown/20 px-4 h-12 bg-white/70"
-              placeholder="Postcode or area"
-            />
+             <select
+              className="w-full rounded-xl border border-brown/20 px-4 h-12 bg-white/70 text-sm"
+              defaultValue=""
+            >
+              <option value="" disabled>
+                Select location
+              </option>
+              <option value="glasgow-west-end">Glasgow - West End</option>
+            </select>
+            
           </div>
-          <div>
-            <label className="block text-brown/80 text-sm mb-1">Date</label>
-            <input
-              className="w-full rounded-xl border border-brown/20 px-4 h-12 bg-white/70"
-              placeholder="dd/mm/yyyy"
-            />
-          </div>
+          
           <Link href="/kelvinhair" className="block">
             <button className="w-full h-12 rounded-xl bg-brown text-white font-semibold">
               Search TrimZi

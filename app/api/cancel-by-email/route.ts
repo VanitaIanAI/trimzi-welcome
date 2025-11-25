@@ -18,40 +18,62 @@ export async function GET(req: Request) {
     const data = verifyCancelToken(token);
     if (!data?.eventId) return NextResponse.json({ error: 'Invalid or expired token' }, { status: 403 });
 
-    const calendar = await getCalendar();
+      const calendar = await getCalendar();
 
-    // (for SMS) fetch details before deletion, if available
-let smsSummary: string | null = null;
-let smsStartISO: string | null = null;
-let smsCustomerName: string | null = null;
-try {
-  const getRes = await calendar.events.get({
-    calendarId: CALENDAR_ID,
-    eventId: data.eventId,
-  });
-  const ev = getRes.data || {};
+    // (for SMS / refund logic) fetch details before deletion, if available
+    let smsSummary: string | null = null;
+    let smsStartISO: string | null = null;
+    let smsCustomerName: string | null = null;
+    let autoRefundEligible: boolean | null = null;
 
-  // Service summary (we set this when creating the event)
-  smsSummary = typeof ev.summary === 'string' ? ev.summary : null;
+    try {
+      const getRes = await calendar.events.get({
+        calendarId: CALENDAR_ID,
+        eventId: data.eventId,
+      });
+      const ev = getRes.data || {};
 
-  // Start time (ISO)
-  smsStartISO =
-    (ev.start && (ev.start as any).dateTime) ||
-    (ev.start && (ev.start as any).date) ||
-    null;
+      // Service summary (we set this when creating the event)
+      smsSummary = typeof ev.summary === 'string' ? ev.summary : null;
 
-  // Prefer the private extended property we set on create
-  const priv = (ev.extendedProperties && (ev.extendedProperties as any).private) || {};
-  if (priv && typeof (priv as any).customerName === 'string' && (priv as any).customerName.trim()) {
-    smsCustomerName = (priv as any).customerName.trim();
-  } else if (smsSummary && smsSummary.includes(' — ')) {
-    // Fallback: our summary is "<service> — <customerName>"
-    const parts = smsSummary.split(' — ');
-    smsCustomerName = parts[parts.length - 1]?.trim() || null;
-  }
-} catch {
-  // ignore — proceed regardless
-}
+      // Start time (ISO)
+      smsStartISO =
+        (ev.start && (ev.start as any).dateTime) ||
+        (ev.start && (ev.start as any).date) ||
+        null;
+
+      // Prefer the private extended property we set on create
+      const priv = (ev.extendedProperties && (ev.extendedProperties as any).private) || {};
+
+      if (priv && typeof (priv as any).customerName === 'string' && (priv as any).customerName.trim()) {
+        smsCustomerName = (priv as any).customerName.trim();
+      } else if (smsSummary && smsSummary.includes(' — ')) {
+        // Fallback: our summary is "<service> — <customerName>"
+        const parts = smsSummary.split(' — ');
+        smsCustomerName = parts[parts.length - 1]?.trim() || null;
+      }
+
+      // NEW: compute whether this booking is eligible for automatic refund
+      const paymentMethod =
+        typeof (priv as any).paymentMethod === 'string' ? (priv as any).paymentMethod : null;
+      const paymentStatus =
+        typeof (priv as any).paymentStatus === 'string' ? (priv as any).paymentStatus : null;
+
+      const isPayNow = paymentMethod === 'pay_now';
+      const isPaid = paymentStatus === 'paid';
+
+      if (smsStartISO) {
+        const startTimeMs = new Date(smsStartISO).getTime();
+        const nowMs = Date.now();
+        const diffHours = (startTimeMs - nowMs) / (1000 * 60 * 60);
+        const isMoreThan24HoursBefore = diffHours >= 24;
+        autoRefundEligible = Boolean(isPayNow && isPaid && isMoreThan24HoursBefore);
+      } else {
+        autoRefundEligible = null;
+      }
+    } catch {
+      // ignore — proceed regardless
+    }
 
 
 

@@ -621,12 +621,19 @@ const handleGuest = async () => {
       aria-modal="true"
       className="relative w-[92%] max-w-md bg-white rounded-2xl shadow-xl border border-brown/10 p-5"
     >
-      <h2 className="text-brown text-lg font-semibold mb-2">Heads up — TrimZi is in active development</h2>
+      <h2 className="text-brown text-lg font-semibold mb-2">Heads up — TrimZi changes</h2>
       <p className="text-brown/80 text-sm">
-        We’re rolling out features over the next few weeks. Online payments are coming soon,
-        and we’d love your feedback in the meantime.
-
-        Don't stress about the various options, a simple click on 'search' will take you to the Kelvinhair page.
+       ******* UPDATES ******      
+       
+      </p>
+      <p className="text-brown/80 text-sm">
+      - Pay online is up and running 🎉
+      </p>
+      <p className="text-brown/80 text-sm">
+      - Kelvinhair quicklink button added
+      </p>
+      <p className="text-brown/80 text-sm">
+      Please note if you experience any payment issues, your booking WILL still be processed and you can pay in the shop as usual.
       </p>
       <p className="text-brown/70 text-xs mt-2">
         Tap anywhere outside this box or “Got it” to continue.

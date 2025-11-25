@@ -160,6 +160,10 @@ const barberParam = searchParams.get('barber');
   const dayIdx = useMemo(() => new Date(selectedDate).getDay(), [selectedDate]);
   const serviceDuration = searchParams.get('durationMins');
   const [barber, setBarber] = useState<string>("");
+
+ // Track which payment option this booking attempt is using
+  const [pendingPaymentMethod, setPendingPaymentMethod] = useState<'pay_now' | 'pay_later' | null>(null);
+
   // Auto-select barber from query param (if valid)
 useEffect(() => {
   if (barberParam && BARBERS.includes(barberParam as any)) {
@@ -168,6 +172,7 @@ useEffect(() => {
 }, [barberParam]);
   const [selectedTime, setSelectedTime] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
+  const [redirectingToPayment, setRedirectingToPayment] = useState(false);
   const durationMins = Number(serviceDuration ?? 30); //fallback if query param missing
   const isDisabled = pending || !barber || !selectedTime || !OPEN_DAYS.includes(dayIdx as any);
   const router = useRouter();
@@ -259,9 +264,13 @@ function buildCalendarLinks(opts: {
 }
 
 
-// we’ll stash the name/phone we’re going to submit with, then ask for the note
-const [pendingContact, setPendingContact] = useState<{ name: string; phone: string; email?: string } | null>(null);
-
+// we’ll stash the name/phone/payment we’re going to submit with, then ask for the note
+const [pendingContact, setPendingContact] = useState<{
+  name: string;
+  phone: string;
+  email?: string;
+  paymentMethod: 'pay_now' | 'pay_later';
+} | null>(null);
 
   // Start time differs for Saturday
   const slots = useMemo(() => {
@@ -360,8 +369,16 @@ async function getCustomerDetails() {
   return { customerName, customerPhone };
 }
 
-async function submitBookingWith(customerName: string, customerPhone: string, note: string = '', attendeeEmailOverride?: string | null) {
+async function submitBookingWith(
+  customerName: string,
+  customerPhone: string,
+  note: string = '',
+  attendeeEmailOverride?: string | null,
+  paymentMethod: 'pay_now' | 'pay_later' = 'pay_later'
+) {
+  
   setPending(true);
+  setRedirectingToPayment(false);
   try {
     // Build start/end ISO strings (your booking is always 45m – we keep your current derivation)
     if (!selectedTime) throw new Error('No time selected');
@@ -370,19 +387,24 @@ async function submitBookingWith(customerName: string, customerPhone: string, no
     end.setMinutes(end.getMinutes() + durationMins);
     const endISO = end.toISOString();
 
+        // For now both options are effectively "unpaid" – when Square is added,
+    // pay_now bookings will move to "paid".
+    const initialPaymentStatus: 'unpaid' | 'paid' | 'partially_paid' = 'unpaid';
+
 // Determine attendee email from the current user (only if not anonymous)
 const uForEmail = auth.currentUser;
 const attendeeEmail =
   uForEmail && !uForEmail.isAnonymous ? (uForEmail.email ?? null) : (attendeeEmailOverride ?? null);
 
     // POST to your API route
+    // Call your existing booking API first
     const res = await fetch('/api/bookings', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         summary: serviceName ?? 'Trimzi Booking',
         description: `Booked via Trimzi — Barber: ${barber || 'Ian'}`,
-        startISO,                     // server still enforces 45m
+        startISO, // server still enforces 45m
         attendeeEmail,
         barberName: barber || 'Ian',
         customerName,
@@ -390,6 +412,9 @@ const attendeeEmail =
         date: selectedDate,
         holdId: holdId || null,
         noteText: note,
+        // metadata only, for future Square/refund logic
+        paymentMethod,
+        paymentStatus: initialPaymentStatus,
       }),
     });
 
@@ -398,7 +423,10 @@ const attendeeEmail =
       throw new Error(json.message || 'Booking failed');
     }
 
-    // Save a copy to user’s bookings if signed in (your existing logic unchanged)
+    const eventId: string | null =
+      typeof json.eventId === 'string' ? json.eventId : null;
+
+    // Save a copy to user’s bookings if signed in (unchanged from before)
     try {
       const u = auth.currentUser;
       if (!u || u.isAnonymous) {
@@ -421,6 +449,9 @@ const attendeeEmail =
             eventId: json.eventId ?? null,
             createdAt: serverTimestamp(),
             note: note ? note : null,
+            // NEW: payment metadata (does not affect current flow)
+            paymentMethod,
+            paymentStatus: initialPaymentStatus,
           },
           { merge: true }
         );
@@ -429,7 +460,60 @@ const attendeeEmail =
       console.warn('Saved booking to Firestore failed:', e);
     }
 
-    // Show your existing confirmation sheet
+    // If this booking was "pay now" and we have a valid price, try to start Square checkout
+    if (paymentMethod === 'pay_now') {
+      let amountMinor: number | null = null;
+
+      if (servicePrice && !Number.isNaN(Number(servicePrice))) {
+        // Convert pounds to pence (e.g. "22" -> 2200)
+        amountMinor = Math.round(Number(servicePrice) * 100);
+      }
+
+         if (!amountMinor) {
+        console.warn('Missing or invalid servicePrice – falling back to pay in shop');
+        setRedirectingToPayment(false);
+        alert(
+          'Your booking is confirmed, but we could not start the online payment. Please pay in the shop.'
+        );
+      } else {
+        try {
+            setRedirectingToPayment(true);
+          const payRes = await fetch('/api/payments/create-payment-link', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              amount: amountMinor,
+              currency: 'GBP',
+              eventId,
+              serviceName: serviceName ?? 'Trimzi Booking',
+            }),
+          });
+
+          const payJson = await payRes.json().catch(() => null);
+
+          if (payRes.ok && payJson?.ok && typeof payJson.url === 'string') {
+            // Redirect straight to the Square-hosted checkout page
+            window.location.href = payJson.url as string;
+            return; // important: do not show the in-app confirmation sheet as well
+          } else {
+            console.warn('Square payment link failed:', payJson);
+            setRedirectingToPayment(false);
+            alert(
+              'Your booking is confirmed, but we could not start the online payment. Please pay in the shop.'
+            );
+          }
+        } catch (e) {
+          console.error('Square payment link error:', e);
+          setRedirectingToPayment(false);
+          alert(
+            'Your booking is confirmed, but we could not start the online payment. Please pay in the shop.'
+          );
+        }
+      }
+    }
+
+    // Normal / fallback path: show your existing confirmation sheet in the app
+    setRedirectingToPayment(false);
     setConfirm({
       service: serviceName ?? 'Trimzi Booking',
       dateLabel: formatUK(selectedDate),
@@ -438,8 +522,10 @@ const attendeeEmail =
       htmlLink: json.htmlLink ?? null,
     });
     setShowConfirm(true);
+
   } catch (err: any) {
     console.error(err);
+    setRedirectingToPayment(false);
     alert(`Error: ${err.message ?? err}`);
   } finally {
     setPending(false);
@@ -448,7 +534,9 @@ const attendeeEmail =
 
 
 
-async function handleBook() {
+async function handleBook(selectedPaymentMethod: 'pay_now' | 'pay_later') {
+  // remember which option this attempt is using, so the contact modal can pick it up
+  setPendingPaymentMethod(selectedPaymentMethod);
   if (!selectedDate || !selectedTime) {
     alert('Please choose a date and a time first.');
     return;
@@ -487,10 +575,15 @@ async function handleBook() {
     return; // wait for modal's "Save & continue"
   }
 
-// We have a phone already – ask for an optional note before submitting
-setPendingContact({ name: existingName, phone: existingPhone, email: contactEmail });
-setShowNoteModal(true);
-return;
+ // We have a phone already – ask for an optional note before submitting
+  setPendingContact({
+    name: existingName,
+    phone: existingPhone,
+    email: contactEmail,
+    paymentMethod: selectedPaymentMethod,
+  });
+  setShowNoteModal(true);
+  return;
 
 }
 
@@ -776,8 +869,16 @@ return;
     }
     setShowContactModal(false);
 
+    // Decide which payment method this booking will use (fallback to 'pay_later' just in case)
+    const method: 'pay_now' | 'pay_later' = pendingPaymentMethod ?? 'pay_later';
+
     // After we have contact details, ask for an optional note
-    setPendingContact({ name: contactName.trim(), phone: normalized, email: contactEmail.trim() });
+    setPendingContact({
+      name: contactName.trim(),
+      phone: normalized,
+      email: contactEmail.trim(),
+      paymentMethod: method,
+    });
     setShowNoteModal(true);
   } catch (e) {
     console.error(e);
@@ -809,10 +910,16 @@ return;
     {/* backdrop */}
     <div
       className="absolute inset-0 bg-black/40"
-      onClick={() => {
+         onClick={() => {
         // clicking backdrop = skip
         setShowNoteModal(false);
-        submitBookingWith(pendingContact.name, pendingContact.phone, '', pendingContact.email || null);
+        submitBookingWith(
+          pendingContact.name,
+          pendingContact.phone,
+          '',
+          pendingContact.email || null,
+          pendingContact.paymentMethod
+        );
         setPendingContact(null);
       }}
     />
@@ -847,7 +954,13 @@ return;
           onClick={() => {
             // skip note
             setShowNoteModal(false);
-            submitBookingWith(pendingContact.name, pendingContact.phone, '', pendingContact.email || null);
+            submitBookingWith(
+              pendingContact.name,
+              pendingContact.phone,
+              '',
+              pendingContact.email || null,
+              pendingContact.paymentMethod
+            );
             setPendingContact(null);
             setNoteText('');
           }}
@@ -860,7 +973,13 @@ return;
           className="flex-1 h-12 rounded-xl bg-brown text-white font-semibold hover:bg-brown/90"
           onClick={() => {
             setShowNoteModal(false);
-            submitBookingWith(pendingContact.name, pendingContact.phone, noteText.trim(), pendingContact.email || null);
+            submitBookingWith(
+              pendingContact.name,
+              pendingContact.phone,
+              noteText.trim(),
+              pendingContact.email || null,
+              pendingContact.paymentMethod
+            );
             setPendingContact(null);
             setNoteText('');
           }}
@@ -882,20 +1001,51 @@ return;
   </p>
 ) : null}
 
+           {/* Primary: Book and pay now */}
           <button
             type="button"
             disabled={isDisabled}
-            onClick={handleBook}
+            onClick={() => handleBook('pay_now')}
             className={`w-full rounded-2xl px-5 py-4 text-center font-semibold transition
               ${isDisabled
                 ? 'bg-brown/20 text-brown/50 cursor-not-allowed'
                 : 'bg-brown text-ivory hover:bg-brown/90'}`}
-            
           >
-            {pending ? 'Booking...' : 'Continue'}
+             {redirectingToPayment
+              ? 'Redirecting to payment…'
+              : pending
+                ? 'Booking…'
+                : 'Book and pay now'}
           </button>
-         
-               <p className="mt-3 text-xs text-brown/60 text-center">
+
+          {/* Secondary: Book and pay in-store */}
+<button
+  type="button"
+  disabled={isDisabled}
+  onClick={() => handleBook('pay_later')}
+  className={`mt-3 w-full rounded-2xl px-5 py-4 text-center font-semibold transition
+    ${isDisabled
+      ? 'bg-ivory text-brown/40 border border-brown/10 cursor-not-allowed'
+      : 'bg-ivory text-brown border border-brown hover:bg-brown/5'}`}
+>
+  Book and pay in-store
+</button>
+
+ {redirectingToPayment && (
+            <div className="mt-3 flex items-center justify-center gap-2 text-xs text-brown/70">
+              <div className="h-4 w-4 rounded-full border-2 border-brown/20 border-t-brown animate-spin" />
+              <span>Redirecting you to secure payment…</span>
+            </div>
+          )}
+
+          {/* Cancellation policy copy */}
+          <p className="mt-3 text-xs text-brown/70 text-center">
+            If you cancel more than 24 hours before your appointment, any online payment can usually be refunded.
+            Cancellations within 24 hours are <span className="font-semibold">not subject to automatic refund</span>{' '}
+            and any refund will be at your barber&apos;s discretion.
+          </p>
+
+          <p className="mt-3 text-xs text-brown/60 text-center">
             By booking, you agree to our{' '}
             <Link href="/terms" className="underline hover:no-underline">
               Terms of Use
@@ -906,6 +1056,7 @@ return;
             </Link>
             .
           </p>
+
 
         </div>
         
