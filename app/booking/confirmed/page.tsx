@@ -2,7 +2,7 @@
 
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, Suspense } from 'react';
 import Link from 'next/link';
 import { useSearchParams, useRouter } from 'next/navigation';
 
@@ -45,7 +45,7 @@ function formatUKTime(iso: string): string {
   });
 }
 
-export default function BookingConfirmedPage() {
+function BookingConfirmedContent() {
   const searchParams = useSearchParams();
   const router = useRouter();
   const eventId = searchParams.get('eventId');
@@ -239,5 +239,18 @@ export default function BookingConfirmedPage() {
         </section>
       </main>
     </div>
+  );
+}
+export default function BookingConfirmedPage() {
+  return (
+    <Suspense
+      fallback={
+        <main className="mx-auto max-w-[720px] px-4 py-6">
+          <p className="text-brown/70 text-sm">Loading booking details…</p>
+        </main>
+      }
+    >
+      <BookingConfirmedContent />
+    </Suspense>
   );
 }
