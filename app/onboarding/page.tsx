@@ -53,7 +53,7 @@ export default function Onboarding() {
   const [pending, setPending] = useState(false);
   const disabled = pending;
   const [showPassword, setShowPassword] = useState(false);
-  const [showGuestModal, setShowGuestModal] = useState(false);
+
   const [showAppNotice, setShowAppNotice] = useState(false);
   // Show a blocking overlay across the redirect round-trip
 const [authInProgress, setAuthInProgress] = useState(false);
@@ -354,24 +354,8 @@ const handleForgotPassword = async () => {
   // --- Guest flow (anonymous) ---
 const handleGuest = async () => {
   if (disabled) return;
-
-  // Show the one-time notice modal first (per browser session)
-  try {
-    if (typeof window !== 'undefined' && !sessionStorage.getItem('guestModalShown')) {
-      sessionStorage.setItem('guestModalShown', '1');
-      setShowGuestModal(true);
-      return; // do NOT sign in yet; wait for user to choose in the modal
-    }
-  } catch {
-    // if sessionStorage fails, just show the modal
-    setShowGuestModal(true);
-    return;
-  }
-
-  // If the notice has already been shown in this session, proceed immediately
   await proceedGuest();
 };
-
 
   return (
     <main className="min-h-dvh bg-ivory flex items-center justify-center">
@@ -434,7 +418,7 @@ const handleGuest = async () => {
               className="w-full h-14 rounded-2xl bg-ivory text-brown border border-brown/20 hover:bg-ivory/80 transition flex items-center justify-center font-medium disabled:opacity-60"
               aria-label="Continue as Guest"
             >
-              Continue as Guest
+              Continue as Guest - contact details required for booking only
             </button>
              {/* Legal notice */}
             <p className="mt-2 text-xs text-brown/60 text-center">
@@ -656,50 +640,7 @@ const handleGuest = async () => {
 )}
 
 
-    {/* Guest info modal */}
-{showGuestModal && (
-  <div className="fixed inset-0 z-50 flex items-center justify-center">
-    {/* backdrop */}
-    <div
-      className="absolute inset-0 bg-black/40"
-      onClick={() => setShowGuestModal(false)}
-      aria-hidden="true"
-    />
-
-    {/* dialog */}
-    <div
-      role="dialog"
-      aria-modal="true"
-      className="relative w-[92%] max-w-md bg-white rounded-2xl shadow-xl border border-brown/10 p-5"
-    >
-      <h2 className="text-brown text-lg font-semibold mb-2">Continue as Guest</h2>
-      <p className="text-brown/80 text-sm">
-        No login is needed to make a booking, but a contact name and number will be required
-        to confirm the booking in case the barber needs to contact you.
-      </p>
-
-      <div className="mt-5 flex gap-3">
-        <button
-          type="button"
-          className="flex-1 h-11 rounded-xl bg-brown text-white font-semibold hover:bg-brown/90"
-          onClick={async () => {
-            setShowGuestModal(false);
-            await proceedGuest();
-          }}
-        >
-          Continue
-        </button>
-        <button
-          type="button"
-          className="h-11 rounded-xl px-4 border border-brown/20 text-brown hover:bg-ivory/80"
-          onClick={() => setShowGuestModal(false)}
-        >
-          Back
-        </button>
-      </div>
-    </div>
-  </div>
-)}
+    
 
 {/* Blocking overlay while Google sign-in is completing */}
 {authInProgress && (

@@ -166,11 +166,16 @@ async function toggleFavourite() {
     <div className="min-h-dvh bg-ivory pb-24">
       {/* Top app bar */}
       <header className="sticky top-0 z-20 bg-white/90 backdrop-blur border-b border-brown/10">
-        <div className="mx-auto max-w-[720px] h-14 px-4 flex items-center justify-between">
-          <h1 className="brand text-brown text-xl font-bold">TrimZi</h1>
-          <Link href="/home" className="text-sm text-brown border border-brown px-3 py-1 rounded-md hover:bg-brown/5">
-            Back
+        <div className="mx-auto max-w-[720px] h-14 px-4 flex items-center">
+          <Link
+            href="/home"
+            aria-label="Back"
+            className="mr-3 text-brown text-2xl leading-none"
+          >
+            {'\u276E'} 
           </Link>
+
+          <h1 className="brand text-brown text-xl font-bold">TrimZi</h1>
         </div>
       </header>
 
