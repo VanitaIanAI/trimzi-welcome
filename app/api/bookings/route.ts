@@ -4,18 +4,19 @@ import { getCalendar, CALENDAR_ID, TZ } from '@lib/googleCalendar';
 import { assertEnv } from '@lib/assertEnv';
 import { adminDb } from '@lib/firebaseAdmin';
 import { addMinutes, fetchBusyIntervals, overlaps } from '@lib/availability';
-import sgMail from '@sendgrid/mail';
+
 import { signCancelToken } from '@lib/token';
 import { randomUUID } from 'crypto';
+import { Resend } from 'resend';
 
 export async function POST(req: Request) {
   try {
     assertEnv('GOOGLE_CALENDAR_ID');
 
-    // Init SendGrid if configured (safe no-op if missing in dev)
-if (process.env.SENDGRID_API_KEY) {
-  sgMail.setApiKey(process.env.SENDGRID_API_KEY);
-}
+  const resend =
+  process.env.RESEND_API_KEY
+    ? new Resend(process.env.RESEND_API_KEY)
+    : null;
 
     const body = await req.json();
     const {
@@ -173,9 +174,9 @@ const event = {
 
     if (holdId) await adminDb.collection('holds').doc(holdId).delete().catch(() => {});
 
-    // Send customer confirmation email via SendGrid (only if we have an email & key)
+    // Send customer confirmation email via Resend
 try {
-  if (process.env.SENDGRID_API_KEY && process.env.SENDGRID_FROM && attendeeEmail) {
+  if (resend && process.env.RESEND_FROM && attendeeEmail) {
     const when = new Date(startISO).toLocaleString('en-GB', {
       timeZone: TZ,
       weekday: 'long',
@@ -186,67 +187,47 @@ try {
       minute: '2-digit',
     });
 
-    const safeService = summary || 'Trimzi Booking';
+    const safeService = summary || 'TrimZi Booking';
     const safeBarber = barberName || 'Ian';
 
     const paymentMethodLabel =
-      normalisedPaymentMethod === 'pay_now' ? 'Pay online' : 'Pay on the day';
-
-    const cancellationPolicyHtml =
       normalisedPaymentMethod === 'pay_now'
-        ? `
-          <p style="margin:12px 0 0;font-size:13px;color:#444;">
-            If you cancel more than 24 hours before your appointment, any online payment will normally be refunded.
-            Cancellations within 24 hours are <strong>not subject to automatic refund</strong> and any refund will be at your barber&apos;s discretion.
-          </p>
-        `
-        : `
-          <p style="margin:12px 0 0;font-size:13px;color:#444;">
-            You chose to pay on the day. Cancellations within 24 hours of your appointment may still be charged at your barber&apos;s discretion.
-          </p>
-        `;
+        ? 'Pay online'
+        : 'Pay on the day';
 
-const cancelToken = signCancelToken({ eventId: eventId });
-const cancelUrl = `${process.env.APP_BASE_URL || 'https://trimzi.co.uk'}/cancel?token=${cancelToken}`;
+    const cancelToken = signCancelToken({ eventId });
+    const cancelUrl = `${process.env.APP_BASE_URL || 'https://trimzi.co.uk'}/cancel?token=${cancelToken}`;
 
-    await sgMail.send({
+    await resend.emails.send({
+      from: process.env.RESEND_FROM,
       to: attendeeEmail,
-      from: process.env.SENDGRID_FROM,
-      subject: `Your Trimzi booking is confirmed — ${when}`,
+      subject: `Your TrimZi booking is confirmed — ${when}`,
       html: `
         <div style="font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;line-height:1.5;color:#2b2b2b">
-          <h2 style="margin:0 0 12px">Booking confirmed 🎉</h2>
-          <p style="margin:0 0 12px">Hi${customerName ? ' ' + customerName : ''},</p>
-          <p style="margin:0 0 12px">Your booking is confirmed:</p>
-          <ul style="margin:0 0 12px;padding-left:18px">
+          <h2>Booking confirmed 🎉</h2>
+          <p>Hi${customerName ? ' ' + customerName : ''},</p>
+
+          <ul>
             <li><strong>Service:</strong> ${safeService}</li>
             <li><strong>Barber:</strong> ${safeBarber}</li>
             <li><strong>When:</strong> ${when} (${TZ})</li>
             <li><strong>Payment:</strong> ${paymentMethodLabel}</li>
-            ${customerPhone ? `<li><strong>Phone on file:</strong> ${customerPhone}</li>` : ''}
+            ${customerPhone ? `<li><strong>Phone:</strong> ${customerPhone}</li>` : ''}
           </ul>
-          ${
-            noteText
-              ? `<p style="margin:0 0 12px"><strong>Your note:</strong> ${String(noteText).replace(/</g,'&lt;')}</p>`
-              : ''
-          }
-          ${cancellationPolicyHtml}
-          <p style="margin:12px 0">
-          <p style="margin:12px 0">
-  <a href="${cancelUrl}" style="color:#c00;font-weight:bold;text-decoration:underline;">
-    Cancel this booking
-  </a>
-</p>
-          
-          <p style="margin:16px 0 0">If you need to change this booking, please contact the shop directly.</p>
-          <p style="margin:8px 0 0">— Trimzi</p>
+
+          <p>
+            <a href="${cancelUrl}" style="color:#c00;font-weight:bold">
+              Cancel this booking
+            </a>
+          </p>
+
+          <p>— TrimZi</p>
         </div>
       `,
     });
   }
 } catch (e) {
-  // Never fail the booking because email failed
-  console.warn('SendGrid email failed:', e);
+  console.warn('Resend email failed:', e);
 }
 
 // --- ClickSend SMS alert (owner notification) ---
