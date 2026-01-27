@@ -15,6 +15,51 @@ import { customsearch } from 'googleapis/build/src/apis/customsearch';
 // --- Config ---
 const OPEN_DAYS = [3, 4, 5, 6] as const; // Wed(3)-Sat(6)
 
+// --- Calendar modal helpers (Wed–Sat only) ---
+function isoTodayUK(): string {
+  const parts = new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'Europe/London',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(new Date());
+
+  const get = (t: string) => parts.find(p => p.type === t)?.value || '';
+  return `${get('year')}-${get('month')}-${get('day')}`;
+}
+
+function addMonths(d: Date, delta: number) {
+  const x = new Date(d);
+  x.setMonth(x.getMonth() + delta);
+  x.setDate(1);
+  x.setHours(0, 0, 0, 0);
+  return x;
+}
+
+function monthLabel(d: Date) {
+  return d.toLocaleDateString('en-GB', { month: 'long', year: 'numeric' });
+}
+
+function isOpenDow(dow: number) {
+  return OPEN_DAYS.includes(dow as any);
+}
+
+function buildOpenDatesForMonth(viewMonth: Date, minISO: string): string[] {
+  const y = viewMonth.getFullYear();
+  const m = viewMonth.getMonth();
+  const lastDay = new Date(y, m + 1, 0).getDate();
+
+  const out: string[] = [];
+  for (let day = 1; day <= lastDay; day++) {
+    const d = new Date(y, m, day);
+    const iso = toInputDate(d);
+    if (iso < minISO) continue;
+    if (isOpenDow(d.getDay())) out.push(iso);
+  }
+  return out;
+}
+
+
 // Return next open date in YYYY-MM-DD (for <input type="date">)
 function nextOpenISO(from = new Date()): string {
   const d = new Date(from);
@@ -156,7 +201,7 @@ function BookingContent() {
   // Prefill barber if coming from "Rebook"
 const barberParam = searchParams.get('barber');
 
-  const [selectedDate, setSelectedDate] = useState(toInputDate(new Date()));
+  const [selectedDate, setSelectedDate] = useState(nextOpenISO(new Date()));
   const dayIdx = useMemo(() => new Date(selectedDate).getDay(), [selectedDate]);
   const serviceDuration = searchParams.get('durationMins');
   const [barber, setBarber] = useState<string>("");
@@ -192,6 +237,18 @@ const [holdId, setHoldId] = useState<string | null>(null);
 const [holdExpiry,setHoldExpiry] = useState<number | null>(null);
 const [loadingAvail, setLoadingAvail] = useState(false);
 const [showAllSlots, setShowAllSlots] = useState(false);
+
+// --- Calendar modal state (Wed–Sat only) ---
+const [showCalendarModal, setShowCalendarModal] = useState(false);
+const [viewMonth, setViewMonth] = useState(() => {
+  const d = new Date();
+  d.setDate(1);
+  d.setHours(0, 0, 0, 0);
+  return d;
+});
+
+// dateISO -> 'open' | 'full' | 'loading'
+const [dayStatus, setDayStatus] = useState<Record<string, 'open' | 'full' | 'loading'>>({});
 
 // --- Contact details modal state (for users without phone) ---
 const [showContactModal, setShowContactModal] = useState(false);
@@ -338,6 +395,59 @@ useEffect(() => {
     }
   };
 }, [holdId]);
+
+// Prefetch which Wed–Sat dates are fully booked for the visible month (uses existing /api/availability)
+useEffect(() => {
+  if (!showCalendarModal) return;
+
+  const minISO = isoTodayUK();
+  const barberForCalendar = barber ? barber : 'Ian';
+  const openDates = buildOpenDatesForMonth(viewMonth, minISO);
+
+  // mark as loading first
+  setDayStatus(prev => {
+    const next = { ...prev };
+    for (const iso of openDates) next[iso] = 'loading';
+    return next;
+  });
+
+  let cancelled = false;
+
+  (async () => {
+    try {
+      const results = await Promise.all(
+        openDates.map(async (iso) => {
+          try {
+            const res = await fetch(
+              `/api/availability?date=${encodeURIComponent(iso)}&barber=${encodeURIComponent(barberForCalendar)}`
+            );
+            const json = await res.json();
+            const avail = Array.isArray(json?.available) ? json.available : [];
+            return [iso, (avail.length > 0 ? 'open' : 'full')] as const;
+          } catch {
+            // If something fails, don't block selection; treat as open (conservative)
+            return [iso, 'open'] as const;
+          }
+        })
+      );
+
+      if (cancelled) return;
+
+      setDayStatus(prev => {
+        const next = { ...prev };
+        for (const [iso, status] of results) next[iso] = status;
+        return next;
+      });
+    } catch {
+      // ignore
+    }
+  })();
+
+  return () => {
+    cancelled = true;
+  };
+}, [showCalendarModal, viewMonth, barber]);
+
 
   const randId = () =>
   (typeof crypto !== 'undefined' && 'randomUUID' in crypto)
@@ -627,14 +737,20 @@ async function handleBook(selectedPaymentMethod: 'pay_now' | 'pay_later') {
                 </p>
               </div>
               
-              <input
-                lang="en-GB"
-                type="date"
-                value={selectedDate}
-                min={toInputDate(new Date())} // today or next open day
-                onChange={(e) => setSelectedDate(e.target.value)}
-                className="rounded-md border border-brown/20 bg-white px-3 py-2 text-sm"
-              />  
+              <button
+  type="button"
+  onClick={() => {
+    // ensure calendar opens on the currently selected month
+    const d = new Date(`${selectedDate}T00:00:00`);
+    d.setDate(1);
+    d.setHours(0, 0, 0, 0);
+    setViewMonth(d);
+    setShowCalendarModal(true);
+  }}
+  className="rounded-md border border-brown/20 bg-white px-3 py-2 text-sm"
+>
+  Select date
+</button>
             </div>
             
             {!OPEN_DAYS.includes(new Date(selectedDate).getDay() as (typeof OPEN_DAYS)[number]) && (
@@ -1149,6 +1265,128 @@ async function handleBook(selectedPaymentMethod: 'pay_now' | 'pay_later') {
     </div>
   </div>
 )}
+
+{/* Calendar Modal (Wed–Sat only) */}
+{showCalendarModal && (
+  <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center">
+    {/* backdrop */}
+    <div
+      className="absolute inset-0 bg-black/40"
+      onClick={() => setShowCalendarModal(false)}
+    />
+
+    {/* modal */}
+    <div className="relative w-full sm:max-w-md bg-white rounded-t-2xl sm:rounded-2xl shadow-xl border border-brown/10 p-5 mx-auto">
+      <div className="flex items-center justify-between">
+        <button
+          type="button"
+          className="px-3 py-2 rounded-md border border-brown/20 text-brown text-sm hover:bg-brown/5"
+          onClick={() => setViewMonth(m => addMonths(m, -1))}
+        >
+          Prev
+        </button>
+
+        <div className="text-brown font-semibold">
+          {monthLabel(viewMonth)}
+        </div>
+
+        <button
+          type="button"
+          className="px-3 py-2 rounded-md border border-brown/20 text-brown text-sm hover:bg-brown/5"
+          onClick={() => setViewMonth(m => addMonths(m, 1))}
+        >
+          Next
+        </button>
+      </div>
+
+      <p className="mt-3 text-xs text-brown/70">
+        Select a day (Wed–Sat only). Fully booked days show a 🚫.
+      </p>
+
+      {/* Headers only for Wed–Sat */}
+      <div className="mt-4 grid grid-cols-4 gap-2 text-xs text-brown/60">
+        <div className="text-center">Wed</div>
+        <div className="text-center">Thu</div>
+        <div className="text-center">Fri</div>
+        <div className="text-center">Sat</div>
+      </div>
+
+      {/* Dates: we only render Wed–Sat dates, grouped into rows of 4 */}
+      {(() => {
+        const minISO = isoTodayUK();
+        const dates = buildOpenDatesForMonth(viewMonth, minISO);
+
+        if (!dates.length) {
+          return (
+            <div className="mt-4 text-sm text-brown/70">
+              No available Wed–Sat dates in this month.
+            </div>
+          );
+        }
+
+        const rows: string[][] = [];
+        for (let i = 0; i < dates.length; i += 4) rows.push(dates.slice(i, i + 4));
+
+        return (
+          <div className="mt-3 space-y-2">
+            {rows.map((row, idx) => (
+              <div key={idx} className="grid grid-cols-4 gap-2">
+                {row.map((iso) => {
+                  const dayNum = new Date(`${iso}T00:00:00`).getDate();
+                  const status = dayStatus[iso]; // open | full | loading | undefined
+
+                  const isFull = status === 'full';
+                  const isLoading = status === 'loading';
+
+                  return (
+                    <button
+                      key={iso}
+                      type="button"
+                      disabled={isFull || isLoading}
+                      onClick={() => {
+                        setSelectedDate(iso);
+                        setShowCalendarModal(false);
+                      }}
+                      className={`h-12 rounded-xl border text-sm transition flex items-center justify-center gap-1
+                        ${selectedDate === iso
+                          ? 'bg-brown text-ivory border-brown'
+                          : isFull
+                            ? 'bg-white border-brown/10 text-brown/30 cursor-not-allowed'
+                            : isLoading
+                              ? 'bg-white border-brown/10 text-brown/50 cursor-wait'
+                              : 'bg-white border-brown/20 text-brown hover:border-brown/40'
+                        }`}
+                    >
+                      <span>{dayNum}</span>
+                      {isFull ? <span aria-hidden>🚫</span> : null}
+                      {isLoading ? <span className="text-xs" aria-hidden>…</span> : null}
+                    </button>
+                  );
+                })}
+
+                {/* pad row to 4 cols */}
+                {Array.from({ length: Math.max(0, 4 - row.length) }).map((_, i) => (
+                  <div key={`pad-${idx}-${i}`} />
+                ))}
+              </div>
+            ))}
+          </div>
+        );
+      })()}
+
+      <div className="mt-5 flex gap-3">
+        <button
+          type="button"
+          className="flex-1 h-12 rounded-xl bg-brown text-white font-semibold hover:bg-brown/90"
+          onClick={() => setShowCalendarModal(false)}
+        >
+          Close
+        </button>
+      </div>
+    </div>
+  </div>
+)}
+
 
       </main>
     </div>
