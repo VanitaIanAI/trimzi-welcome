@@ -131,14 +131,46 @@ export async function POST(req: Request) {
           (ev.extendedProperties as any).private) ||
         {};
 
-      // Avoid duplicating the "Payment: PAID..." line if we get multiple webhooks.
-      const alreadyHasPaidLine =
-        /Payment:\s*PAID/i.test(existingDescription);
+     // --- Update the *existing* booking text rather than appending conflicting info ---
+// We want to convert:
+//   "Payment status: unpaid"  -> "Payment status: paid"
+// and avoid leaving both "paid" and "unpaid" in the same description.
 
-      const newDescription = alreadyHasPaidLine
-        ? existingDescription
-        : (existingDescription ? existingDescription + '\n\n' : '') +
-          'Payment: PAID online via Square.';
+function setOrReplaceLine(desc: string, key: string, value: string) {
+  const lines = (desc || '').split('\n');
+  const re = new RegExp(`^${key}\\s*:\\s*.*$`, 'i');
+
+  let replaced = false;
+  const out = lines.map((line) => {
+    if (re.test(line)) {
+      replaced = true;
+      return `${key}: ${value}`;
+    }
+    return line;
+  });
+
+  if (!replaced) {
+    // If the line wasn't present, append it neatly.
+    if (out.length && out[out.length - 1].trim() !== '') out.push('');
+    out.push(`${key}: ${value}`);
+  }
+
+  return out.join('\n');
+}
+
+// Start with whatever is already there
+let newDescription = existingDescription;
+
+// Force the “Payment status” line to match the real payment state
+newDescription = setOrReplaceLine(newDescription, 'Payment status', 'paid');
+
+// Optional: also ensure the method line is consistent for paid online payments
+newDescription = setOrReplaceLine(newDescription, 'Payment method', 'Pay online');
+
+// Also add a short paid marker line (only once)
+if (!/Payment:\s*PAID/i.test(newDescription)) {
+  newDescription = (newDescription ? newDescription + '\n\n' : '') + 'Payment: PAID online via Square.';
+}
 
       const newPrivateProps = {
         ...existingPrivateProps,
@@ -152,6 +184,7 @@ export async function POST(req: Request) {
         calendarId: CALENDAR_ID,
         eventId,
         requestBody: {
+          colorId: '10', // Green = paid
           description: newDescription,
           extendedProperties: {
             private: newPrivateProps,
