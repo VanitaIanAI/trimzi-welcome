@@ -250,6 +250,11 @@ const [viewMonth, setViewMonth] = useState(() => {
 // dateISO -> 'open' | 'full' | 'loading'
 const [dayStatus, setDayStatus] = useState<Record<string, 'open' | 'full' | 'loading'>>({});
 
+// True while any visible day is still loading
+const isCalendarLoading = Object.values(dayStatus).some(
+  (v) => v === 'loading'
+);
+
 // --- Contact details modal state (for users without phone) ---
 const [showContactModal, setShowContactModal] = useState(false);
 const [contactName, setContactName] = useState('');
@@ -1314,67 +1319,95 @@ async function handleBook(selectedPaymentMethod: 'pay_now' | 'pay_later') {
       </div>
 
       {/* Dates: we only render Wed–Sat dates, grouped into rows of 4 */}
-      {(() => {
-        const minISO = isoTodayUK();
-        const dates = buildOpenDatesForMonth(viewMonth, minISO);
+      {/* Show spinner while loading full/open day status */}
+{isCalendarLoading ? (
+  <div className="mt-6 flex items-center justify-center">
+    <div className="h-6 w-6 rounded-full border-2 border-brown/20 border-t-brown animate-spin" />
+  </div>
+) : (
+  (() => {
+    const minISO = isoTodayUK();
+    const dates = buildOpenDatesForMonth(viewMonth, minISO);
 
-        if (!dates.length) {
+    if (!dates.length) {
+      return (
+        <div className="mt-4 text-sm text-brown/70">
+          No available Wed–Sat dates in this month.
+        </div>
+      );
+    }
+
+    // Build rows aligned to real weekdays (Wed–Sat columns), with blanks where needed
+const y = viewMonth.getFullYear();
+const m = viewMonth.getMonth();
+const lastDay = new Date(y, m + 1, 0).getDate();
+
+const rows: (string | null)[][] = [];
+let row: (string | null)[] = [null, null, null, null]; // Wed, Thu, Fri, Sat
+
+for (let day = 1; day <= lastDay; day++) {
+  const mm = String(m + 1).padStart(2, '0');
+  const dd = String(day).padStart(2, '0');
+  const iso = `${y}-${mm}-${dd}`;
+
+  if (iso < minISO) continue;
+
+  const dow = new Date(y, m, day).getDay(); // 0=Sun..6=Sat
+  if (!isOpenDow(dow)) continue;
+
+  const col = dow - 3; // Wed(3)->0 ... Sat(6)->3
+  if (col >= 0 && col <= 3) row[col] = iso;
+
+  // When we hit Saturday, we finish the week row
+  if (dow === 6) {
+    rows.push(row);
+    row = [null, null, null, null];
+  }
+}
+
+// Push last partial row (if it has any dates)
+if (row.some(Boolean)) rows.push(row);
+
+return (
+  <div className="mt-3 space-y-2">
+    {rows.map((r, idx) => (
+      <div key={idx} className="grid grid-cols-4 gap-2">
+        {r.map((iso, colIdx) => {
+          if (!iso) return <div key={`blank-${idx}-${colIdx}`} />;
+
+          const dayNum = Number(iso.slice(8, 10));
+          const status = dayStatus[iso];
+          const isFull = status === 'full';
+
           return (
-            <div className="mt-4 text-sm text-brown/70">
-              No available Wed–Sat dates in this month.
-            </div>
+            <button
+              key={iso}
+              type="button"
+              disabled={isFull}
+              onClick={() => {
+                setSelectedDate(iso);
+                setShowCalendarModal(false);
+              }}
+              className={`h-12 rounded-xl border text-sm transition flex items-center justify-center gap-1
+                ${selectedDate === iso
+                  ? 'bg-brown text-ivory border-brown'
+                  : isFull
+                    ? 'bg-white border-brown/10 text-brown/30 cursor-not-allowed'
+                    : 'bg-white border-brown/20 text-brown hover:border-brown/40'
+                }`}
+            >
+              <span>{dayNum}</span>
+              {isFull ? <span aria-hidden>🚫</span> : null}
+            </button>
           );
-        }
+        })}
+      </div>
+    ))}
+  </div>
+);
+  })()
+)}
 
-        const rows: string[][] = [];
-        for (let i = 0; i < dates.length; i += 4) rows.push(dates.slice(i, i + 4));
-
-        return (
-          <div className="mt-3 space-y-2">
-            {rows.map((row, idx) => (
-              <div key={idx} className="grid grid-cols-4 gap-2">
-                {row.map((iso) => {
-                  const dayNum = new Date(`${iso}T00:00:00`).getDate();
-                  const status = dayStatus[iso]; // open | full | loading | undefined
-
-                  const isFull = status === 'full';
-                  const isLoading = status === 'loading';
-
-                  return (
-                    <button
-                      key={iso}
-                      type="button"
-                      disabled={isFull || isLoading}
-                      onClick={() => {
-                        setSelectedDate(iso);
-                        setShowCalendarModal(false);
-                      }}
-                      className={`h-12 rounded-xl border text-sm transition flex items-center justify-center gap-1
-                        ${selectedDate === iso
-                          ? 'bg-brown text-ivory border-brown'
-                          : isFull
-                            ? 'bg-white border-brown/10 text-brown/30 cursor-not-allowed'
-                            : isLoading
-                              ? 'bg-white border-brown/10 text-brown/50 cursor-wait'
-                              : 'bg-white border-brown/20 text-brown hover:border-brown/40'
-                        }`}
-                    >
-                      <span>{dayNum}</span>
-                      {isFull ? <span aria-hidden>🚫</span> : null}
-                      {isLoading ? <span className="text-xs" aria-hidden>…</span> : null}
-                    </button>
-                  );
-                })}
-
-                {/* pad row to 4 cols */}
-                {Array.from({ length: Math.max(0, 4 - row.length) }).map((_, i) => (
-                  <div key={`pad-${idx}-${i}`} />
-                ))}
-              </div>
-            ))}
-          </div>
-        );
-      })()}
 
       <div className="mt-5 flex gap-3">
         <button
