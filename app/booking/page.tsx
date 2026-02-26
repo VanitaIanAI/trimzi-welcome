@@ -15,6 +15,13 @@ import { customsearch } from 'googleapis/build/src/apis/customsearch';
 // --- Config ---
 const OPEN_DAYS = [3, 4, 5, 6] as const; // Wed(3)-Sat(6)
 
+// Safari-safe: never rely on new Date("YYYY-MM-DD")
+function isoToLocalDate(iso: string): Date {
+  const [y, m, d] = iso.split('-').map(Number);
+  return new Date(y, m - 1, d); // local date at midnight
+}
+
+
 // --- Calendar modal helpers (Wed–Sat only) ---
 function isoTodayUK(): string {
   const parts = new Intl.DateTimeFormat('en-GB', {
@@ -79,7 +86,8 @@ function nextOpenISO(from = new Date()): string {
 
 // UK display date dd-MM-yyyy (for labels/alerts)
 function formatUK(iso: string): string {
-  const d = new Date(iso);
+    const d = isoToLocalDate(iso);
+
   
   const day = d.getDate();
   const suffix =
@@ -100,7 +108,8 @@ function formatUK(iso: string): string {
 
 // Human weekday name for a given ISO date
 function weekdayLabel(iso: string): 'Wednesday' | 'Thursday' | 'Friday' | 'Saturday' | 'Sunday' | 'Monday' | 'Tuesday' {
-  const d = new Date(iso);
+    const d = isoToLocalDate(iso);
+
   return ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'][d.getDay()] as any;
 }
 
@@ -136,7 +145,8 @@ function sectionize(slots: string[]) {
 // Build an ISO timestamp from "YYYY-MM-DD" + "HH:mm"
 function toISO(dateStr: string, timeStr: string): string {
   const [h, m] = timeStr.split(':').map(Number);
-  const d = new Date(`${dateStr}T00:00:00`);
+    const d = isoToLocalDate(dateStr);
+
   d.setHours(h, m, 0, 0);
   return d.toISOString();
 }
@@ -202,7 +212,8 @@ function BookingContent() {
 const barberParam = searchParams.get('barber');
 
   const [selectedDate, setSelectedDate] = useState(nextOpenISO(new Date()));
-  const dayIdx = useMemo(() => new Date(selectedDate).getDay(), [selectedDate]);
+  const dayIdx = useMemo(() => isoToLocalDate(selectedDate).getDay(), [selectedDate]);
+
   const serviceDuration = searchParams.get('durationMins');
   const [barber, setBarber] = useState<string>("");
 
@@ -760,7 +771,8 @@ async function handleBook(selectedPaymentMethod: 'pay_now' | 'pay_later') {
 </button>
             </div>
             
-            {!OPEN_DAYS.includes(new Date(selectedDate).getDay() as (typeof OPEN_DAYS)[number]) && (
+            {!OPEN_DAYS.includes(isoToLocalDate(selectedDate).getDay() as (typeof OPEN_DAYS)[number]) && (
+
               <p className="mt-2 text-xs text-red-700">We're closed on this day. Please choose Wed-Sat.
               </p>
             )}
