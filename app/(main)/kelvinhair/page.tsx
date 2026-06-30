@@ -19,9 +19,6 @@ const services = [
   { id: 'boys_cut',            name: 'Boys cut (<14)',              price: 14, durationMins: 30 },
 ];
 
-const featured = services.slice(0, 3);
-const more = services.slice(3);
-
 // salon identity used for favourites
 const SALON_ID = 'kelvinhair';
 const SALON_META = {
@@ -57,56 +54,6 @@ const INFO_COPY: Record<Exclude<InfoKind, null>, { title: string; body: string; 
     subText: 'Because the techniques and importantly time involved differ, some styles may cost more.',
   },
 };
-
-
-function MoreOptions({ more }: { more: any[] }) {
-  'use client';
-  const [open, setOpen] = React.useState(false);
-
-  return (
-    <>
-      {open && (
-        <section className="mt-3 bg-white rounded-xl border border-brown/10 divide-y divide-brown/10">
-          {more.map((svc) => (
-            <Link
-              key={svc.id}
-              href={{
-                pathname: '/booking',
-                query: { name: svc.name, price: svc.price, durationMins: svc.durationMins },
-              }}
-              className="p-4 flex items-start justify-between gap-4 hover:bg-brown/5"
-            >
-              <div>
-                <h3 className="text-brown font-medium">{svc.name}</h3>
-                <p className="text-brown/70 text-sm mt-1">{svc.durationMins} mins</p>
-              </div>
-              <div className="text-right">
-                <div className="text-brown font-semibold">£{svc.price}</div>
-                <div className="mt-2 text-sm px-3 py-1 rounded-md bg-brown text-white hover:opacity-90">
-                  Add
-                </div>
-              </div>
-            </Link>
-          ))}
-        </section>
-      )}
-
-      {/* Button stays at the very bottom */}
-      <div className="px-1">
-        <a
-          href="#"
-          onClick={(e) => {
-            e.preventDefault();
-            setOpen(true);
-          }}
-          className="block w-full text-center border border-brown text-brown py-3 rounded-lg hover:bg-brown/5"
-        >
-          Full styling options
-        </a>
-      </div>
-    </>
-  );
-}
 
 export default function KelvinhairPage() {
   
@@ -240,9 +187,9 @@ async function toggleFavourite() {
           </div>
         </section>
 
-        {/* Featured services (3 items) */}
+        {/* Services */}
         <section className="bg-white rounded-xl border border-brown/10 divide-y divide-brown/10">
-          {featured.map((svc) => (
+          {services.map((svc) => (
             <Link
               key={svc.id}
               href={{
@@ -287,75 +234,6 @@ async function toggleFavourite() {
             </Link>
           ))}
         </section>
-
-        {more.length > 0 && (
-  // make details a vertical flex container we can order its children in
-  <details className="group flex flex-col">
-  {/* Extra two items — appear BETWEEN the first 3 and the toggle */}
-  <section className="order-1 hidden group-open:block mt-3 bg-white rounded-xl border border-brown/10 divide-y divide-brown/10">
-    {more.map((svc) => (
-      <Link
-        key={svc.id}
-        href={{
-          pathname: '/booking',
-          query: { name: svc.name, price: svc.price, durationMins: svc.durationMins },
-        }}
-        className="p-4 flex items-start justify-between gap-4 hover:bg-brown/5"
-      >
-        <div>
-          <div className="flex items-start gap-2">
-  <h3 className="text-brown font-medium">{svc.name}</h3>
-  {/* Light-blue info "i" icon — stops navigation and opens modal */}
-  {infoKindByServiceId[svc.id] && (
-    <button
-      type="button"
-      onClick={(e) => {
-        e.preventDefault(); // prevent Link navigation
-        e.stopPropagation();
-        setInfoOpen(infoKindByServiceId[svc.id]);
-      }}
-      className="shrink-0 mt-[2px] text-sky-400 hover:text-sky-500 focus:outline-none focus:ring-2 focus:ring-sky-300/50 rounded"
-      aria-label={`More info about ${svc.name}`}
-    >
-      {/* simple "i" icon */}
-      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-        <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="2" />
-        <path d="M12 10v7" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
-        <circle cx="12" cy="7" r="1.25" fill="currentColor" />
-      </svg>
-    </button>
-  )}
-</div>
-
-          <p className="text-brown/70 text-sm mt-1">{svc.durationMins} mins</p>
-        </div>
-        <div className="text-right">
-          <div className="text-brown font-semibold">£{svc.price}</div>
-          <div className="mt-2 text-sm px-3 py-1 rounded-md bg-brown text-white hover:opacity-90">
-            Add
-          </div>
-        </div>
-      </Link>
-    ))}
-  </section>
-
-  {/* Toggle stays visually at the bottom */}
-  <summary
-    className="order-2 list-none cursor-pointer select-none"
-    aria-label="Toggle full styling options"
-  >
-    {/* collapsed label */}
-    <span className="block w-full text-center border border-brown text-brown py-3 rounded-lg hover:bg-brown/5 group-open:hidden">
-      Full styling options
-    </span>
-    {/* expanded label */}
-    <span className="hidden w-full text-center border border-brown text-brown py-3 rounded-lg hover:bg-brown/5 group-open:block">
-      Less options
-    </span>
-  </summary>
-</details>
-
-)}
         
 {/* x — Shared info modal */}
 {infoOpen && (

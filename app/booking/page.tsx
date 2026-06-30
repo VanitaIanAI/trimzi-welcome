@@ -743,6 +743,25 @@ async function handleBook(selectedPaymentMethod: 'pay_now' | 'pay_later') {
             </p>
           </section>
         )}
+        {/* Barber card + selector */}
+        <section className="mt-6 rounded-2xl bg-brown/5 border border-brown/10 p-4">
+          <div className="flex items-center justify-between gap-4">
+            <div className="flex items-center gap-3">
+              {/* Simple avatar */}
+              <div className="size-10 rounded-full bg-brown/10 flex items-center justify-center">
+                <span className="text-brown/80 text-sm">👤</span>
+              </div>
+              <div className="leading-tight">
+                <p className="text-xs text-brown/60">Barber</p>
+                <p className="font-semibold">{barber}</p>
+              </div>
+            </div>
+
+            <div className="rounded-md border border-brown/20 bg-white px-3 py-2 text-sm text-brown">
+              Ian
+            </div>
+          </div>
+        </section>
         {/* Date picker */}
         <section className="mt-6 rounded-2x1 bg-brown/5 border border-brown/10 p-4">
           <label className="text-sm block">
@@ -777,37 +796,6 @@ async function handleBook(selectedPaymentMethod: 'pay_now' | 'pay_later') {
               </p>
             )}
           </label>
-        </section>
-        {/* Barber card + selector */}
-        <section className="mt-6 rounded-2xl bg-brown/5 border border-brown/10 p-4">
-          <div className="flex items-center justify-between gap-4">
-            <div className="flex items-center gap-3">
-              {/* Simple avatar */}
-              <div className="size-10 rounded-full bg-brown/10 flex items-center justify-center">
-                <span className="text-brown/80 text-sm">👤</span>
-              </div>
-              <div className="leading-tight">
-                <p className="text-xs text-brown/60">Barber</p>
-                <p className="font-semibold">{barber}</p>
-              </div>
-            </div>
-
-            <label className="text-sm">
-              <span className="sr-only">Choose barber</span>
-              <select
-                value={barber}
-                onChange={(e) => setBarber(e.target.value)}
-                className="rounded-md border border-brown/20 bg-white px-3 py-2 text-sm"
-              >
-                <option value="" disabled>
-                  Select Barber
-                </option>
-                {BARBERS.map((b) => (
-                  <option key={b} value={b}>{b}</option>
-                ))}
-              </select>
-            </label>
-          </div>
         </section>
 
            {/* Toggle: Show all times vs only available */}
