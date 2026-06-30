@@ -215,7 +215,7 @@ const barberParam = searchParams.get('barber');
   const dayIdx = useMemo(() => isoToLocalDate(selectedDate).getDay(), [selectedDate]);
 
   const serviceDuration = searchParams.get('durationMins');
-  const [barber, setBarber] = useState<string>("");
+  const [barber, setBarber] = useState<string>("Ian");
 
  // Track which payment option this booking attempt is using
   const [pendingPaymentMethod, setPendingPaymentMethod] = useState<'pay_now' | 'pay_later' | null>(null);
@@ -927,12 +927,13 @@ async function handleBook(selectedPaymentMethod: 'pay_now' | 'pay_later') {
 
       <div className="space-y-3">
         <div>
-          <label className="block text-sm mb-1">Full name</label>
+          <label className="block text-sm mb-1">Name</label>
           <input
             className="w-full rounded-md border border-brown/20 bg-ivory px-3 py-2 text-sm"
             value={contactName}
             onChange={(e) => setContactName(e.target.value)}
             placeholder="Your name"
+            required
           />
         </div>
         <div>
@@ -967,6 +968,11 @@ async function handleBook(selectedPaymentMethod: 'pay_now' | 'pay_later') {
           disabled={savingContact}
           className="flex-1 h-12 rounded-xl bg-brown text-white font-semibold hover:bg-brown/90 disabled:opacity-60"
           onClick={async () => {
+  if (!contactName.trim()) {
+    alert('Please enter your name.');
+    return;
+  }
+
   const normalized = normalizeUKMobile(contactPhone.trim());
 
   if (!normalized) {
