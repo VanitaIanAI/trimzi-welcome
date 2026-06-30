@@ -119,21 +119,47 @@ export default function HomePage() {
           </h2>
         </section>
 
-         {/* Quick link to Kelvinhair (left-justified, own row, below hero) */}
-        <div>
-          <Link
-            href="/kelvinhair"
-            className="group inline-flex items-center gap-2 px-3 py-1 rounded-full border border-brown/30 text-brown hover:border-brown hover:bg-brown/5 transition"
-            aria-label="Go to Kelvinhair"
-          >
-            <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-brown text-white text-[10px] font-semibold">
-              ★
-            </span>
-            <span className="text-sm font-medium">Most popular: Kelvinhair</span>
-          </Link>
+        <div className="flex gap-3">
+          <div className="w-[25%] max-w-[180px]">
+            <Link
+              href="/kelvinhair"
+              className="group block overflow-hidden rounded-2xl border border-brown/10 bg-white shadow-card transition hover:-translate-y-0.5 hover:shadow-[0_8px_24px_rgba(79,49,25,0.12)]"
+              aria-label="Go to Kelvinhair"
+            >
+              <div className="relative aspect-[16/9] w-full">
+                <Image
+                  src="/images/kelvinhair-hero.jpg"
+                  alt="Kelvinhair salon"
+                  fill
+                  className="object-cover transition-transform duration-200 group-hover:scale-[1.02]"
+                  sizes="(max-width: 720px) 100vw, 720px"
+                />
+              </div>
+              <div className="px-3 py-2 text-sm font-medium text-brown/80">Kelvinhair</div>
+            </Link>
+          </div>
+
+          <div className="w-[25%] max-w-[180px]">
+            <Link
+              href="/salon-2"
+              className="group block overflow-hidden rounded-2xl border border-brown/10 bg-white shadow-card transition hover:-translate-y-0.5 hover:shadow-[0_8px_24px_rgba(79,49,25,0.12)]"
+              aria-label="Go to salon 2"
+            >
+              <div className="relative aspect-[16/9] w-full">
+                <Image
+                  src="/images/kelvinhair-hero.jpg"
+                  alt="Coming soon salon"
+                  fill
+                  className="object-cover transition-transform duration-200 group-hover:scale-[1.02]"
+                  sizes="(max-width: 720px) 100vw, 720px"
+                />
+              </div>
+              <div className="px-3 py-2 text-sm font-medium text-brown/80">Coming soon</div>
+            </Link>
+          </div>
         </div>
 
-        {/* small spacer between quick link and tabs */}
+        {/* small spacer between salon card and tabs */}
         <div className="h-2" />
 
         {/* Tabs */}

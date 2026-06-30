@@ -952,7 +952,7 @@ async function handleBook(selectedPaymentMethod: 'pay_now' | 'pay_later') {
           <input
   type="tel"
   inputMode="tel"
-  pattern="^(\+447\d{9}|07\d{9})$"
+ 
   className="w-full rounded-md border border-brown/20 bg-ivory px-3 py-2 text-sm"
   value={contactPhone}
   onChange={(e) => setContactPhone(e.target.value)}
