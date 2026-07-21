@@ -4,7 +4,7 @@
 
 export const dynamic = 'force-dynamic';
 
-import React, { useMemo, useState, useEffect, Suspense } from 'react';
+import React, { useMemo, useState, useEffect, Suspense, useRef } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { auth, db } from '../../lib/firebaseClient';
 import { setDoc, doc, serverTimestamp, getDoc } from 'firebase/firestore';
@@ -114,6 +114,51 @@ function weekdayLabel(iso: string): 'Wednesday' | 'Thursday' | 'Friday' | 'Satur
 }
 
 const BARBERS = ['Ian'] as const;
+const HOLD_SESSION_STORAGE_KEY = 'trimzi-active-hold';
+
+type StoredHoldState = {
+  holdId: string;
+  holdExpiry: number;
+  selectedDate: string;
+  selectedTime: string;
+  barber: string;
+};
+
+function readStoredHoldState(): StoredHoldState | null {
+  if (typeof window === 'undefined') return null;
+
+  try {
+    const raw = window.sessionStorage.getItem(HOLD_SESSION_STORAGE_KEY);
+    if (!raw) return null;
+
+    const parsed = JSON.parse(raw) as Partial<StoredHoldState>;
+    if (!parsed.holdId || !parsed.holdExpiry || !parsed.selectedDate || !parsed.selectedTime || !parsed.barber) {
+      window.sessionStorage.removeItem(HOLD_SESSION_STORAGE_KEY);
+      return null;
+    }
+
+    if (Date.now() > parsed.holdExpiry) {
+      window.sessionStorage.removeItem(HOLD_SESSION_STORAGE_KEY);
+      return null;
+    }
+
+    return parsed as StoredHoldState;
+  } catch {
+    window.sessionStorage.removeItem(HOLD_SESSION_STORAGE_KEY);
+    return null;
+  }
+}
+
+function writeStoredHoldState(value: StoredHoldState | null) {
+  if (typeof window === 'undefined') return;
+
+  if (!value) {
+    window.sessionStorage.removeItem(HOLD_SESSION_STORAGE_KEY);
+    return;
+  }
+
+  window.sessionStorage.setItem(HOLD_SESSION_STORAGE_KEY, JSON.stringify(value));
+}
 
 // Build 15-min slot labels between a start and end (inclusive) like "09:30" -> "19:15"
 function buildSlots(startHour: number, startMin: number, endHour: number, endMin: number) {
@@ -248,6 +293,17 @@ const [holdId, setHoldId] = useState<string | null>(null);
 const [holdExpiry,setHoldExpiry] = useState<number | null>(null);
 const [loadingAvail, setLoadingAvail] = useState(false);
 const [showAllSlots, setShowAllSlots] = useState(false);
+const [hasCheckedStoredHold, setHasCheckedStoredHold] = useState(false);
+
+const persistActiveHold = (value: StoredHoldState | null) => {
+  writeStoredHoldState(value);
+};
+
+const clearPersistedHold = () => {
+  setHoldId(null);
+  setHoldExpiry(null);
+  persistActiveHold(null);
+};
 
 // --- Calendar modal state (Wed–Sat only) ---
 const [showCalendarModal, setShowCalendarModal] = useState(false);
@@ -355,62 +411,77 @@ const [pendingContact, setPendingContact] = useState<{
 
   const sections = useMemo(() => sectionize(slots), [slots]);
 
-// 🆕 Fetch availability & manage holds when date/barber changes
 useEffect(() => {
-  // If user changes date/barber, clear current selection and release any hold
-  setSelectedTime(null);
+  const restoredHold = readStoredHoldState();
+  if (restoredHold) {
+    setSelectedDate(restoredHold.selectedDate);
+    setSelectedTime(restoredHold.selectedTime);
+    setBarber(restoredHold.barber);
+    setHoldId(restoredHold.holdId);
+    setHoldExpiry(restoredHold.holdExpiry);
+  }
 
-  const release = async () => {
-    if (holdId) {
+  setHasCheckedStoredHold(true);
+}, []);
+
+// Fetch availability when date/barber changes
+  useEffect(() => {
+    if (!hasCheckedStoredHold) return;
+
+    let cancelled = false;
+
+    const fetchAvail = async () => {
+      if (!OPEN_DAYS.includes(dayIdx as any) || !barber) {
+        if (!cancelled) {
+          setAvailable([]);
+          setLoadingAvail(false);
+        }
+        return;
+      }
+      if (!cancelled) setLoadingAvail(true);
       try {
-        await fetch(`/api/holds?holdId=${encodeURIComponent(holdId)}`, { method: 'DELETE' });
-      } catch {}
-      setHoldId(null);
-      setHoldExpiry(null);
-    }
-  };
+        const barberParam = barber.charAt(0).toUpperCase() + barber.slice(1).toLowerCase();
+        const res = await fetch(`/api/availability?date=${selectedDate}&barber=${encodeURIComponent(barberParam)}`);
+        const json = await res.json();
+        if (!cancelled) {
+          setAvailable(json.available || []);
+        }
+      } catch (e) {
+        console.error('Fetch availability failed:', e);
+        if (!cancelled) {
+          setAvailable([]);
+        }
+      } finally {
+        if (!cancelled) {
+          setLoadingAvail(false);
+        }
+      }
+    };
 
- const fetchAvail = async () => {
-  if (!OPEN_DAYS.includes(dayIdx as any) || !barber) {
-    setAvailable([]);
-    setLoadingAvail(false);
+    void fetchAvail();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedDate, barber, dayIdx, hasCheckedStoredHold]);
+
+useEffect(() => {
+  if (!holdExpiry) return;
+
+  const remainingMs = holdExpiry - Date.now();
+  if (remainingMs <= 0) {
+    setSelectedTime(prev => (prev && holdId && holdExpiry ? null : prev));
+    clearPersistedHold();
     return;
   }
-  setLoadingAvail(true);
-  try {
-    const barberParam = barber.charAt(0).toUpperCase() + barber.slice(1).toLowerCase();
-    const res = await fetch(`/api/availability?date=${selectedDate}&barber=${encodeURIComponent(barberParam)}`);
-    const json = await res.json();
-    setAvailable(json.available || []);
-  } catch (e) {
-    console.error('Fetch availability failed:', e);
-    setAvailable([]);
-  } finally {
-    setLoadingAvail(false);
-  }
-};
 
+  const timer = window.setTimeout(() => {
+    setSelectedTime(prev => (prev && holdId && holdExpiry ? null : prev));
+    clearPersistedHold();
+  }, remainingMs);
 
-
-{/* Show loader while we fetch availability */}
-{loadingAvail && OPEN_DAYS.includes(dayIdx as any) && barber && (
-  <div className="mt-6 rounded-2xl bg-white border border-brown/10 p-4 flex items-center gap-3">
-    <div className="h-5 w-5 rounded-full border-2 border-brown/20 border-t-brown animate-spin" />
-    <p className="text-sm text-brown">Checking available times…</p>
-  </div>
-)}
-
-  release().finally(fetchAvail);
-}, [selectedDate, barber, dayIdx]); // re-run whenever these change
-
-useEffect(() => {
-  // cleanup when component unmounts or holdId changes next time
-  return () => {
-    if (holdId) {
-      fetch(`/api/holds?holdId=${encodeURIComponent(holdId)}`, { method: 'DELETE' }).catch(() => {});
-    }
-  };
-}, [holdId]);
+  return () => window.clearTimeout(timer);
+}, [holdExpiry, holdId]);
 
 // Prefetch which Wed–Sat dates are fully booked for the visible month (uses existing /api/availability)
 useEffect(() => {
@@ -551,6 +622,8 @@ const attendeeEmail =
 
     const eventId: string | null =
       typeof json.eventId === 'string' ? json.eventId : null;
+
+    clearPersistedHold();
 
     // Save a copy to user’s bookings if signed in (unchanged from before)
     try {
@@ -832,12 +905,23 @@ async function handleBook(selectedPaymentMethod: 'pay_now' | 'pay_later') {
           const list = (sections as any)[section] as string[];
           if (!list?.length) return null;
 
+          const isOwnHeldSlotActive = Boolean(
+            holdId && holdExpiry && holdExpiry > Date.now() && selectedTime
+          );
+
+          const visibleSlots = new Set<string>([
+            ...available.filter((t) => !isSlotInPast(selectedDate, t)),
+            ...(isOwnHeldSlotActive && selectedTime && !isSlotInPast(selectedDate, selectedTime)
+              ? [selectedTime]
+              : []),
+          ]);
+
           // Decide which times to display:
-          // - Default: only show *available* and *not in the past*
+          // - Default: show the normal available slots and add the customer’s own active hold slot
           // - If toggle is ON (showAllSlots), show everything (disabled ones stay disabled)
           const displayList = showAllSlots
-            ? list
-            : list.filter((t) => available.includes(t) && !isSlotInPast(selectedDate, t));
+            ? list.filter((t) => !isSlotInPast(selectedDate, t))
+            : list.filter((t) => visibleSlots.has(t));
 
           if (!displayList.length) return null;
 
@@ -848,7 +932,13 @@ async function handleBook(selectedPaymentMethod: 'pay_now' | 'pay_later') {
                 {displayList.map((t) => {
                   const isPast = isSlotInPast(selectedDate, t);
                   const active = selectedTime === t;
-                  const isValid = available.includes(t); // fits a 45-min booking
+                  const isOwnHeldSlot = Boolean(
+                    holdId &&
+                    holdExpiry &&
+                    holdExpiry > Date.now() &&
+                    selectedTime === t
+                  );
+                  const isValid = showAllSlots ? available.includes(t) || isOwnHeldSlot : visibleSlots.has(t); // fits a 45-min booking
 
                   return (
                     <button
@@ -861,10 +951,9 @@ async function handleBook(selectedPaymentMethod: 'pay_now' | 'pay_later') {
                         // release previous hold (if any)
                         if (holdId) {
                           try { await fetch(`/api/holds?holdId=${encodeURIComponent(holdId)}`, { method: 'DELETE' }); } catch {}
-                          setHoldId(null);
-                          setHoldExpiry(null);
                         }
 
+                        clearPersistedHold();
                         setSelectedTime(t);
 
                         try {
@@ -885,6 +974,13 @@ async function handleBook(selectedPaymentMethod: 'pay_now' | 'pay_later') {
                           }
                           setHoldId(json.holdId);
                           setHoldExpiry(Date.parse(json.expiresAt));
+                          persistActiveHold({
+                            holdId: json.holdId,
+                            holdExpiry: Date.parse(json.expiresAt),
+                            selectedDate,
+                            selectedTime: t,
+                            barber,
+                          });
                         } catch (e) {
                           console.error(e);
                           alert('Could not reserve the slot. Please try again.');
@@ -1391,6 +1487,11 @@ return (
               type="button"
               disabled={isFull}
               onClick={() => {
+                if (holdId) {
+                  try { void fetch(`/api/holds?holdId=${encodeURIComponent(holdId)}`, { method: 'DELETE' }); } catch {}
+                }
+                clearPersistedHold();
+                setSelectedTime(null);
                 setSelectedDate(iso);
                 setShowCalendarModal(false);
               }}
