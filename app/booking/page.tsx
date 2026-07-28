@@ -981,6 +981,14 @@ async function handleBook(selectedPaymentMethod: 'pay_now' | 'pay_later') {
                             selectedTime: t,
                             barber,
                           });
+
+                          try {
+                            const availRes = await fetch(`/api/availability?date=${selectedDate}&barber=${encodeURIComponent(barber)}`);
+                            const availJson = await availRes.json();
+                            setAvailable(availJson.available || []);
+                          } catch (e) {
+                            console.error('Availability refresh after hold creation failed:', e);
+                          }
                         } catch (e) {
                           console.error(e);
                           alert('Could not reserve the slot. Please try again.');
