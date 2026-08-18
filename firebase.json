@@ -2,6 +2,9 @@
   "hosting": {
     "site": "trimzi",
     "source": ".",
-    "frameworksBackend": { "region": "europe-west2" }
+    "frameworksBackend": {
+      "region": "europe-west2",
+      "memory": "512MiB"
+    }
   }
 }
