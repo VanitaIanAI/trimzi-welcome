@@ -140,22 +140,15 @@ export default function HomePage() {
           </div>
 
           <div className="w-[25%] max-w-[180px]">
-            <Link
-              href="/salon-2"
+            <div
               className="group block overflow-hidden rounded-2xl border border-brown/10 bg-white shadow-card transition hover:-translate-y-0.5 hover:shadow-[0_8px_24px_rgba(79,49,25,0.12)]"
               aria-label="Go to salon 2"
             >
-              <div className="relative aspect-[16/9] w-full">
-                <Image
-                  src="/images/kelvinhair-hero.jpg"
-                  alt="Coming soon salon"
-                  fill
-                  className="object-cover transition-transform duration-200 group-hover:scale-[1.02]"
-                  sizes="(max-width: 720px) 100vw, 720px"
-                />
+              <div className="relative flex aspect-[16/9] w-full items-center justify-center border-b border-brown/10 bg-brown/5 text-center text-brown">
+                <span className="text-sm font-medium tracking-wide">New Opportunity</span>
               </div>
               <div className="px-3 py-2 text-sm font-medium text-brown/80">Coming soon</div>
-            </Link>
+            </div>
           </div>
         </div>
 

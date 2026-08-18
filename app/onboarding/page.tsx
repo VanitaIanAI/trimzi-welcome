@@ -605,19 +605,9 @@ const handleGuest = async () => {
       aria-modal="true"
       className="relative w-[92%] max-w-md bg-white rounded-2xl shadow-xl border border-brown/10 p-5"
     >
-      <h2 className="text-brown text-lg font-semibold mb-2">Heads up — TrimZi changes</h2>
+      <h2 className="text-brown text-lg font-semibold mb-2">New and improved app ready for use - Aug '26</h2>
       <p className="text-brown/80 text-sm">
-       ******* UPDATES ******      
-       
-      </p>
-      <p className="text-brown/80 text-sm">
-      - Pay online is up and running 🎉
-      </p>
-      <p className="text-brown/80 text-sm">
-      - Kelvinhair quicklink button added
-      </p>
-      <p className="text-brown/80 text-sm">
-      Please note if you experience any payment issues, your booking WILL still be processed and you can pay in the shop as usual.
+        Big thanks to everyone whose feedback has helped eliminate some errors. If you receive any new booking error messages, please be kind enough to send me a screenshot for further improvements 🙏
       </p>
       <p className="text-brown/70 text-xs mt-2">
         Tap anywhere outside this box or “Got it” to continue.

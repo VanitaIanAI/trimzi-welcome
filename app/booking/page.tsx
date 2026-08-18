@@ -107,7 +107,8 @@ function formatUK(iso: string): string {
 }
 
 // Human weekday name for a given ISO date
-function weekdayLabel(iso: string): 'Wednesday' | 'Thursday' | 'Friday' | 'Saturday' | 'Sunday' | 'Monday' | 'Tuesday' {
+function weekdayLabel(iso: string): 'Wednesday' | 'Thursday' | 'Friday' | 'Saturday' | 'Sunday' | 'Monday' | 'Tuesday' | ' ' {
+    if (!iso) return ' ';
     const d = isoToLocalDate(iso);
 
   return ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'][d.getDay()] as any;
@@ -222,6 +223,8 @@ function nowUKDateAndTime() {
 }
 
 function isSlotInPast(dateISO: string, timeHHMM: string) {
+  if (!dateISO || !timeHHMM) return false;
+
   const { dateISO: todayUK, timeHHMM: nowUK } = nowUKDateAndTime();
 
   if (dateISO < todayUK) return true;                  // any past day
@@ -256,8 +259,8 @@ function BookingContent() {
   // Prefill barber if coming from "Rebook"
 const barberParam = searchParams.get('barber');
 
-  const [selectedDate, setSelectedDate] = useState(nextOpenISO(new Date()));
-  const dayIdx = useMemo(() => isoToLocalDate(selectedDate).getDay(), [selectedDate]);
+  const [selectedDate, setSelectedDate] = useState('');
+  const dayIdx = useMemo(() => (selectedDate ? isoToLocalDate(selectedDate).getDay() : -1), [selectedDate]);
 
   const serviceDuration = searchParams.get('durationMins');
   const [barber, setBarber] = useState<string>("Ian");
@@ -275,7 +278,7 @@ useEffect(() => {
   const [pending, setPending] = useState(false);
   const [redirectingToPayment, setRedirectingToPayment] = useState(false);
   const durationMins = Number(serviceDuration ?? 30); //fallback if query param missing
-  const isDisabled = pending || !barber || !selectedTime || !OPEN_DAYS.includes(dayIdx as any);
+  const isDisabled = pending || !barber || !selectedDate || !selectedTime || !OPEN_DAYS.includes(dayIdx as any);
   const router = useRouter();
 
 const [showConfirm, setShowConfirm] = useState(false);
@@ -403,11 +406,12 @@ const [pendingContact, setPendingContact] = useState<{
 
   // Start time differs for Saturday
   const slots = useMemo(() => {
+    if (!selectedDate) return [];
     const isSaturday = dayIdx === 6;
     const [sh, sm] = isSaturday ? [9, 0] : [9, 30];   // Sat 09:00, Wed-Fri 09:30
     const [eh, em] = isSaturday ? [17, 15] : [19, 15];                        // Sat 17:15, else 19:15
     return buildSlots(sh, sm, eh, em);
-  }, [dayIdx]);
+  }, [dayIdx, selectedDate]);
 
   const sections = useMemo(() => sectionize(slots), [slots]);
 
@@ -431,6 +435,13 @@ useEffect(() => {
     let cancelled = false;
 
     const fetchAvail = async () => {
+      if (!selectedDate) {
+        if (!cancelled) {
+          setAvailable([]);
+          setLoadingAvail(false);
+        }
+        return;
+      }
       if (!OPEN_DAYS.includes(dayIdx as any) || !barber) {
         if (!cancelled) {
           setAvailable([]);
@@ -578,7 +589,7 @@ async function submitBookingWith(
   setRedirectingToPayment(false);
   try {
     // Build start/end ISO strings (your booking is always 45m – we keep your current derivation)
-    if (!selectedTime) throw new Error('No time selected');
+    if (!selectedDate || !selectedTime) throw new Error('No date or time selected');
     const startISO = toISO(selectedDate, selectedTime);
     const end = new Date(startISO);
     end.setMinutes(end.getMinutes() + durationMins);
@@ -843,15 +854,15 @@ async function handleBook(selectedPaymentMethod: 'pay_now' | 'pay_later') {
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-xs text-brown/60">Date</p>
-                <p className="font-semibold text-brown">{formatUK(selectedDate)}
+                <p className="font-semibold text-brown">
+                  {selectedDate ? formatUK(selectedDate) : 'Please select a date'}
                 </p>
               </div>
               
               <button
   type="button"
   onClick={() => {
-    // ensure calendar opens on the currently selected month
-    const d = new Date(`${selectedDate}T00:00:00`);
+    const d = selectedDate ? new Date(`${selectedDate}T00:00:00`) : new Date();
     d.setDate(1);
     d.setHours(0, 0, 0, 0);
     setViewMonth(d);
@@ -863,7 +874,7 @@ async function handleBook(selectedPaymentMethod: 'pay_now' | 'pay_later') {
 </button>
             </div>
             
-            {!OPEN_DAYS.includes(isoToLocalDate(selectedDate).getDay() as (typeof OPEN_DAYS)[number]) && (
+            {selectedDate && !OPEN_DAYS.includes(isoToLocalDate(selectedDate).getDay() as (typeof OPEN_DAYS)[number]) && (
 
               <p className="mt-2 text-xs text-red-700">We're closed on this day. Please choose Wed-Sat.
               </p>
@@ -872,7 +883,7 @@ async function handleBook(selectedPaymentMethod: 'pay_now' | 'pay_later') {
         </section>
 
            {/* Toggle: Show all times vs only available */}
-        {OPEN_DAYS.includes(dayIdx as any) && barber && (
+        {selectedDate && OPEN_DAYS.includes(dayIdx as any) && barber && (
           <div className="mt-4 flex items-center justify-end">
             <button
               type="button"
@@ -886,14 +897,14 @@ async function handleBook(selectedPaymentMethod: 'pay_now' | 'pay_later') {
 
 
         {/* Closed day message */}
-        {!OPEN_DAYS.includes(dayIdx as any) ? (
+        {!selectedDate ? null : !OPEN_DAYS.includes(dayIdx as any) ? (
           <p className="mt-6 text-brown/70 text-sm">No slots: we're closed on {weekdayLabel(selectedDate)}.</p>
         ) : (
           <>
         
 
           {/* Show loader while we fetch availability */}
-{loadingAvail && OPEN_DAYS.includes(dayIdx as any) && barber && (
+{selectedDate && loadingAvail && OPEN_DAYS.includes(dayIdx as any) && barber && (
   <div className="mt-6 rounded-2xl bg-white border border-brown/10 p-4 flex items-center gap-3">
     <div className="h-5 w-5 rounded-full border-2 border-brown/20 border-t-brown animate-spin" />
     <p className="text-sm text-brown">Checking available times…</p>
@@ -901,7 +912,7 @@ async function handleBook(selectedPaymentMethod: 'pay_now' | 'pay_later') {
 )}
 
          {/* Sections */}
-        {(['Morning','Midday / Afternoon','Afternoon / Evening'] as const).map((section) => {
+        {selectedDate && (['Morning','Midday / Afternoon','Afternoon / Evening'] as const).map((section) => {
           const list = (sections as any)[section] as string[];
           if (!list?.length) return null;
 
