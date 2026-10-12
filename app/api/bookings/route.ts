@@ -175,6 +175,14 @@ const event = {
     if (holdId) await adminDb.collection('holds').doc(holdId).delete().catch(() => {});
 
     // Send customer confirmation email via Resend
+
+console.log('[Booking email] Configuration check:', {
+  hasApiKey: Boolean(process.env.RESEND_API_KEY?.trim()),
+  hasSender: Boolean(process.env.RESEND_FROM?.trim()),
+  hasRecipient: Boolean(attendeeEmail?.trim()),
+  hasCancelSecret: Boolean(process.env.CANCEL_TOKEN_SECRET?.trim()),
+});
+
 try {
   if (resend && process.env.RESEND_FROM && attendeeEmail) {
     const when = new Date(startISO).toLocaleString('en-GB', {
@@ -198,7 +206,7 @@ try {
     const cancelToken = signCancelToken({ eventId });
     const cancelUrl = `${process.env.APP_BASE_URL || 'https://trimzi.co.uk'}/cancel?token=${cancelToken}`;
 
-    await resend.emails.send({
+    const emailResult = await resend.emails.send({
       from: process.env.RESEND_FROM,
       to: attendeeEmail,
       subject: `Your TrimZi booking is confirmed — ${when}`,
@@ -224,10 +232,29 @@ try {
           <p>— TrimZi</p>
         </div>
       `,
-    });
+        });
+
+    if (emailResult.error) {
+      console.error('[Booking email] Resend rejected the request:', {
+        name: emailResult.error.name,
+        message: emailResult.error.message,
+      });
+    } else if (emailResult.data?.id) {
+      console.log(
+        '[Booking email] Resend accepted the email:',
+        emailResult.data.id
+      );
+    } else {
+      console.warn('[Booking email] No email ID or error returned.');
+    }
+  } else {
+    console.warn('[Booking email] Sending skipped: missing API key, sender or recipient.');
   }
 } catch (e) {
-  console.warn('Resend email failed:', e);
+  console.error(
+    '[Booking email] Failed before completion:',
+    e instanceof Error ? e.message : 'Unknown error'
+  );
 }
 
 // --- ClickSend SMS alert (owner notification) ---
