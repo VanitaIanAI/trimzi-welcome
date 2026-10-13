@@ -1275,7 +1275,7 @@ async function handleBook(selectedPaymentMethod: 'pay_now' | 'pay_later') {
           >
              {redirectingToPayment
               ? 'Redirecting to payment…'
-              : pending
+              : pending && pendingPaymentMethod === 'pay_now'
                 ? 'Booking…'
                 : 'Book and pay now'}
           </button>
@@ -1290,7 +1290,7 @@ async function handleBook(selectedPaymentMethod: 'pay_now' | 'pay_later') {
       ? 'bg-ivory text-brown/40 border border-brown/10 cursor-not-allowed'
       : 'bg-ivory text-brown border border-brown hover:bg-brown/5'}`}
 >
-  Book and pay in-store
+  {pending && pendingPaymentMethod === 'pay_later' ? 'Booking…' : 'Book and pay in-store'}
 </button>
 
  {redirectingToPayment && (
