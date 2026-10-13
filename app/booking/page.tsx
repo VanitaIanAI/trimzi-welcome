@@ -317,13 +317,17 @@ const [viewMonth, setViewMonth] = useState(() => {
   return d;
 });
 
-// dateISO -> 'open' | 'full' | 'loading'
-const [dayStatus, setDayStatus] = useState<Record<string, 'open' | 'full' | 'loading'>>({});
+// Calendar overview only; time-slot and booking checks remain authoritative.
+const [dayStatus, setDayStatus] = useState<Record<string, 'open' | 'full' | 'loading' | 'error'>>({});
+const [calendarRetry, setCalendarRetry] = useState(0);
 
 // True while any visible day is still loading
-const isCalendarLoading = Object.values(dayStatus).some(
-  (v) => v === 'loading'
+const visibleCalendarDates = buildOpenDatesForMonth(viewMonth, isoTodayUK());
+const isCalendarLoading = visibleCalendarDates.some(
+  (iso) => dayStatus[iso] === undefined || dayStatus[iso] === 'loading'
 );
+
+const hasCalendarErrors = visibleCalendarDates.some((iso) => dayStatus[iso] === 'error');
 
 // --- Contact details modal state (for users without phone) ---
 const [showContactModal, setShowContactModal] = useState(false);
@@ -510,21 +514,34 @@ useEffect(() => {
   });
 
   let cancelled = false;
+  const controllers = new Set<AbortController>();
+  const availabilityTimeoutMs = 10000;
 
   (async () => {
     try {
       const results = await Promise.all(
         openDates.map(async (iso) => {
+          const controller = new AbortController();
+          controllers.add(controller);
+          const timeout = window.setTimeout(() => controller.abort(), availabilityTimeoutMs);
           try {
             const res = await fetch(
-              `/api/availability?date=${encodeURIComponent(iso)}&barber=${encodeURIComponent(barberForCalendar)}`
+              `/api/availability?date=${encodeURIComponent(iso)}&barber=${encodeURIComponent(barberForCalendar)}`,
+              { signal: controller.signal }
             );
+            if (!res.ok) throw new Error('Availability request failed');
             const json = await res.json();
-            const avail = Array.isArray(json?.available) ? json.available : [];
+            if (!Array.isArray(json?.available) || !json.available.every((slot: unknown) => typeof slot === 'string')) {
+              throw new Error('Invalid availability response');
+            }
+            const avail = json.available;
             return [iso, (avail.length > 0 ? 'open' : 'full')] as const;
           } catch {
-            // If something fails, don't block selection; treat as open (conservative)
-            return [iso, 'open'] as const;
+            // A failed check is not evidence that a day is fully booked.
+            return [iso, 'error'] as const;
+          } finally {
+            window.clearTimeout(timeout);
+            controllers.delete(controller);
           }
         })
       );
@@ -543,8 +560,9 @@ useEffect(() => {
 
   return () => {
     cancelled = true;
+    controllers.forEach(controller => controller.abort());
   };
-}, [showCalendarModal, viewMonth, barber]);
+}, [showCalendarModal, viewMonth, barber, calendarRetry]);
 
 
   const randId = () =>
@@ -1431,6 +1449,19 @@ async function handleBook(selectedPaymentMethod: 'pay_now' | 'pay_later') {
         Select a day (Wed–Sat only). Fully booked days show a 🚫.
       </p>
 
+      {hasCalendarErrors && !isCalendarLoading && (
+        <div className="mt-3 rounded-lg border border-brown/20 p-3 text-sm text-brown" role="status">
+          <p>Some dates couldn’t be checked. You can select a date to check its times, or retry.</p>
+          <button
+            type="button"
+            className="mt-2 underline font-semibold"
+            onClick={() => setCalendarRetry(value => value + 1)}
+          >
+            Retry availability
+          </button>
+        </div>
+      )}
+
       {/* Headers only for Wed–Sat */}
       <div className="mt-4 grid grid-cols-4 gap-2 text-xs text-brown/60">
         <div className="text-center">Wed</div>
@@ -1442,8 +1473,9 @@ async function handleBook(selectedPaymentMethod: 'pay_now' | 'pay_later') {
       {/* Dates: we only render Wed–Sat dates, grouped into rows of 4 */}
       {/* Show spinner while loading full/open day status */}
 {isCalendarLoading ? (
-  <div className="mt-6 flex items-center justify-center">
-    <div className="h-6 w-6 rounded-full border-2 border-brown/20 border-t-brown animate-spin" />
+  <div className="mt-6 flex items-center justify-center gap-2" role="status">
+    <div aria-hidden="true" className="h-6 w-6 rounded-full border-2 border-brown/20 border-t-brown animate-spin" />
+    <span className="text-sm text-brown/70">Checking dates…</span>
   </div>
 ) : (
   (() => {
@@ -1505,6 +1537,7 @@ return (
               key={iso}
               type="button"
               disabled={isFull}
+              aria-label={status === 'error' ? `${dayNum}: availability not checked` : undefined}
               onClick={() => {
                 if (holdId) {
                   try { void fetch(`/api/holds?holdId=${encodeURIComponent(holdId)}`, { method: 'DELETE' }); } catch {}
