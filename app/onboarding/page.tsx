@@ -28,6 +28,30 @@ import {
 } from 'firebase/auth';
 import { doc, setDoc, serverTimestamp } from 'firebase/firestore';
 
+// Temporary October 2026 maintenance; noon UK time is GMT on 25 October.
+const OCTOBER_REOPEN_AT = Date.parse('2026-10-25T12:00:00Z');
+function useOctoberMaintenance() {
+  const [active, setActive] = React.useState<boolean | null>(null);
+  React.useEffect(() => {
+    let timer: ReturnType<typeof setTimeout>;
+    const refresh = () => {
+      clearTimeout(timer);
+      const remaining = OCTOBER_REOPEN_AT - Date.now();
+      setActive(remaining > 0);
+      if (remaining > 0) timer = setTimeout(refresh, Math.min(remaining, 60000));
+    };
+    refresh();
+    window.addEventListener('focus', refresh);
+    document.addEventListener('visibilitychange', refresh);
+    return () => {
+      clearTimeout(timer);
+      window.removeEventListener('focus', refresh);
+      document.removeEventListener('visibilitychange', refresh);
+    };
+  }, []);
+  return active;
+}
+
 /** Create/merge a basic profile for the user */
 async function ensureProfile(
   uid: string,
@@ -55,6 +79,10 @@ export default function Onboarding() {
   const [showPassword, setShowPassword] = useState(false);
 
   const [showAppNotice, setShowAppNotice] = useState(false);
+  const octoberMaintenance = useOctoberMaintenance();
+  const appNoticeKey = octoberMaintenance === false
+    ? 'appNoticeOctober2026Reopened'
+    : 'appNoticeOctober2026Maintenance';
   // Show a blocking overlay across the redirect round-trip
 const [authInProgress, setAuthInProgress] = useState(false);
 
@@ -81,12 +109,13 @@ React.useEffect(() => {
 }, []);
 
 React.useEffect(() => {
+  if (octoberMaintenance === null) return;
   try {
-    if (typeof window !== 'undefined' && !sessionStorage.getItem('appNoticeShown')) {
-      setShowAppNotice(true);
-    }
-  } catch {}
-}, []);
+    setShowAppNotice(!sessionStorage.getItem(appNoticeKey));
+  } catch {
+    setShowAppNotice(true);
+  }
+}, [octoberMaintenance, appNoticeKey]);
 
 // Handle Google redirect result ONCE on first mount
 React.useEffect(() => {
@@ -594,7 +623,7 @@ const handleGuest = async () => {
     <div
       className="absolute inset-0 bg-black/40"
       onClick={() => {
-        try { sessionStorage.setItem('appNoticeShown', '1'); } catch {}
+        try { sessionStorage.setItem(appNoticeKey, '1'); } catch {}
         setShowAppNotice(false);
       }}
       aria-hidden="true"
@@ -605,9 +634,11 @@ const handleGuest = async () => {
       aria-modal="true"
       className="relative w-[92%] max-w-md bg-white rounded-2xl shadow-xl border border-brown/10 p-5"
     >
-      <h2 className="text-brown text-lg font-semibold mb-2">New and improved app ready for use - Aug '26</h2>
+      <h2 className="text-brown text-lg font-semibold mb-2">{octoberMaintenance ? 'Important update: scheduled maintenance' : 'Booking update'}</h2>
       <p className="text-brown/80 text-sm">
-        Big thanks to everyone whose feedback has helped eliminate some errors. If you receive any new booking error messages, please be kind enough to send me a screenshot for further improvements 🙏
+        {octoberMaintenance
+          ? 'Bookings for 28–31 October are temporarily unavailable. These dates will reopen for booking at 12 noon UK time on Sunday 25 October. All other dates remain available as normal.'
+          : 'Bookings for 28–31 October have reopened. Please choose a date to check available appointment times. Thank you for your patience during maintenance.'}
       </p>
       <p className="text-brown/70 text-xs mt-2">
         Tap anywhere outside this box or “Got it” to continue.
@@ -618,7 +649,7 @@ const handleGuest = async () => {
           type="button"
           className="h-11 rounded-xl px-4 border border-brown/20 text-brown hover:bg-ivory/80"
           onClick={() => {
-            try { sessionStorage.setItem('appNoticeShown', '1'); } catch {}
+            try { sessionStorage.setItem(appNoticeKey, '1'); } catch {}
             setShowAppNotice(false);
           }}
         >

@@ -15,6 +15,34 @@ import { customsearch } from 'googleapis/build/src/apis/customsearch';
 // --- Config ---
 const OPEN_DAYS = [3, 4, 5, 6] as const; // Wed(3)-Sat(6)
 
+// Temporary October 2026 maintenance; noon UK time is GMT on 25 October.
+const OCTOBER_REOPEN_AT = Date.parse('2026-10-25T12:00:00Z');
+function useOctoberMaintenance() {
+  const [active, setActive] = React.useState<boolean | null>(null);
+  React.useEffect(() => {
+    let timer: ReturnType<typeof setTimeout>;
+    const refresh = () => {
+      clearTimeout(timer);
+      const remaining = OCTOBER_REOPEN_AT - Date.now();
+      setActive(remaining > 0);
+      if (remaining > 0) timer = setTimeout(refresh, Math.min(remaining, 60000));
+    };
+    refresh();
+    window.addEventListener('focus', refresh);
+    document.addEventListener('visibilitychange', refresh);
+    return () => {
+      clearTimeout(timer);
+      window.removeEventListener('focus', refresh);
+      document.removeEventListener('visibilitychange', refresh);
+    };
+  }, []);
+  return active;
+}
+
+function isOctoberMaintenanceDate(dateISO: string, active: boolean | null) {
+  return active !== false && ['2026-10-28', '2026-10-29', '2026-10-30', '2026-10-31'].includes(dateISO);
+}
+
 // Safari-safe: never rely on new Date("YYYY-MM-DD")
 function isoToLocalDate(iso: string): Date {
   const [y, m, d] = iso.split('-').map(Number);
@@ -253,6 +281,7 @@ function looksLikeUKMobile(raw: string): boolean {
 
 
 function BookingContent() {
+  const octoberMaintenance = useOctoberMaintenance();
   const searchParams = useSearchParams();
   const serviceName = searchParams.get('name');
   const servicePrice = searchParams.get('price');
@@ -1462,6 +1491,12 @@ async function handleBook(selectedPaymentMethod: 'pay_now' | 'pay_later') {
         </div>
       )}
 
+      {octoberMaintenance === true && (
+        <p className="mt-3 text-sm text-brown" role="status">
+          28–31 October are temporarily unavailable and reopen at 12 noon UK time on Sunday 25 October.
+        </p>
+      )}
+
       {/* Headers only for Wed–Sat */}
       <div className="mt-4 grid grid-cols-4 gap-2 text-xs text-brown/60">
         <div className="text-center">Wed</div>
@@ -1531,13 +1566,14 @@ return (
           const dayNum = Number(iso.slice(8, 10));
           const status = dayStatus[iso];
           const isFull = status === 'full';
+          const isMaintenance = isOctoberMaintenanceDate(iso, octoberMaintenance);
 
           return (
             <button
               key={iso}
               type="button"
-              disabled={isFull}
-              aria-label={status === 'error' ? `${dayNum}: availability not checked` : undefined}
+              disabled={isFull || isMaintenance}
+              aria-label={isMaintenance ? `${dayNum}: temporarily unavailable until noon UK time on 25 October` : status === 'error' ? `${dayNum}: availability not checked` : undefined}
               onClick={() => {
                 if (holdId) {
                   try { void fetch(`/api/holds?holdId=${encodeURIComponent(holdId)}`, { method: 'DELETE' }); } catch {}
@@ -1550,7 +1586,7 @@ return (
               className={`h-12 rounded-xl border text-sm transition flex items-center justify-center gap-1
                 ${selectedDate === iso
                   ? 'bg-brown text-ivory border-brown'
-                  : isFull
+                  : isFull || isMaintenance
                     ? 'bg-white border-brown/10 text-brown/30 cursor-not-allowed'
                     : 'bg-white border-brown/20 text-brown hover:border-brown/40'
                 }`}
