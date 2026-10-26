@@ -29,30 +29,6 @@ import {
 import { doc, runTransaction, serverTimestamp } from 'firebase/firestore';
 import { signInContactPatch } from '@lib/contactDetails';
 
-// Temporary October 2026 maintenance; noon UK time is GMT on 25 October.
-const OCTOBER_REOPEN_AT = Date.parse('2026-10-25T12:00:00Z');
-function useOctoberMaintenance() {
-  const [active, setActive] = React.useState<boolean | null>(null);
-  React.useEffect(() => {
-    let timer: ReturnType<typeof setTimeout>;
-    const refresh = () => {
-      clearTimeout(timer);
-      const remaining = OCTOBER_REOPEN_AT - Date.now();
-      setActive(remaining > 0);
-      if (remaining > 0) timer = setTimeout(refresh, Math.min(remaining, 60000));
-    };
-    refresh();
-    window.addEventListener('focus', refresh);
-    document.addEventListener('visibilitychange', refresh);
-    return () => {
-      clearTimeout(timer);
-      window.removeEventListener('focus', refresh);
-      document.removeEventListener('visibilitychange', refresh);
-    };
-  }, []);
-  return active;
-}
-
 /** Create/merge a basic profile for the user */
 async function ensureProfile(
   uid: string,
@@ -85,10 +61,7 @@ export default function Onboarding() {
   const [showPassword, setShowPassword] = useState(false);
 
   const [showAppNotice, setShowAppNotice] = useState(false);
-  const octoberMaintenance = useOctoberMaintenance();
-  const appNoticeKey = octoberMaintenance === false
-    ? 'appNoticeOctober2026Reopened'
-    : 'appNoticeOctober2026Maintenance';
+  const appNoticeKey = 'appNoticeFestive2026';
   // Show a blocking overlay across the redirect round-trip
 const [authInProgress, setAuthInProgress] = useState(false);
 
@@ -115,13 +88,12 @@ React.useEffect(() => {
 }, []);
 
 React.useEffect(() => {
-  if (octoberMaintenance === null) return;
   try {
     setShowAppNotice(!sessionStorage.getItem(appNoticeKey));
   } catch {
     setShowAppNotice(true);
   }
-}, [octoberMaintenance, appNoticeKey]);
+}, [appNoticeKey]);
 
 // Handle Google redirect result ONCE on first mount
 React.useEffect(() => {
@@ -638,14 +610,34 @@ const handleGuest = async () => {
     <div
       role="dialog"
       aria-modal="true"
-      className="relative w-[92%] max-w-md bg-white rounded-2xl shadow-xl border border-brown/10 p-5"
+      aria-labelledby="app-notice-title"
+      className="relative w-[92%] max-w-md max-h-[90dvh] overflow-y-auto bg-white rounded-2xl shadow-xl border border-brown/10 p-5"
     >
-      <h2 className="text-brown text-lg font-semibold mb-2">{octoberMaintenance ? 'Important update: scheduled maintenance' : 'Booking update'}</h2>
-      <p className="text-brown/80 text-sm">
-        {octoberMaintenance
-          ? 'Bookings for 28–31 October are temporarily unavailable. These dates will reopen for booking at 12 noon UK time on Sunday 25 October. All other dates remain available as normal.'
-          : 'Bookings for 28–31 October have reopened. Please choose a date to check available appointment times. Thank you for your patience during maintenance.'}
+      <h2 id="app-notice-title" className="text-brown text-xl font-semibold mb-3">Festive bookings are open ✨</h2>
+      <p className="text-brown/80 text-sm leading-relaxed">
+        It’s almost that time of year! We won’t mention the “C” word just yet—but the diary is open.
       </p>
+
+      <div className="mt-4 space-y-3 text-sm text-brown/80">
+        <section className="rounded-xl bg-ivory border border-brown/10 p-3">
+          <h3 className="font-semibold text-brown">Extra Monday &amp; Tuesday appointments</h3>
+          <p className="mt-1 font-semibold text-brown">21, 22, 28 &amp; 29 December 2026</p>
+          <p className="mt-1">11 a.m.–6 p.m. · Last appointment starts at <strong>5:15 p.m.</strong></p>
+          <p className="mt-2 text-xs leading-relaxed">Limited availability—book ahead to secure your preferred time.</p>
+        </section>
+
+        <section>
+          <h3 className="font-semibold text-brown">Christmas Eve &amp; New Year’s Eve</h3>
+          <p className="mt-1">Last appointment starts at <strong>1:15 p.m.</strong></p>
+        </section>
+
+        <section>
+          <h3 className="font-semibold text-brown">Closed for the holidays</h3>
+          <p className="mt-1">25–26 December 2026<br />1–2 January 2027</p>
+        </section>
+      </div>
+
+      <p className="mt-4 text-sm font-medium text-brown">Feel free to book ahead into the New Year!</p>
       <p className="text-brown/70 text-xs mt-2">
         Tap anywhere outside this box or “Got it” to continue.
       </p>

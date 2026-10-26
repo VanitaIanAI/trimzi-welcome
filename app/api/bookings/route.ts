@@ -9,6 +9,7 @@ import { signCancelToken } from '@lib/token';
 import { randomUUID } from 'crypto';
 import { Resend } from 'resend';
 import { validateBookingContact } from '@lib/contactDetails';
+import { isChristmasStartAllowed } from '@lib/bookingSchedule';
 
 export async function POST(req: Request) {
   try {
@@ -53,6 +54,11 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: validation.error, message: validation.error }, { status: 400 });
     }
     const { name: customerName, phone: customerPhone, email: attendeeEmail } = validation.contact;
+
+    if (!isChristmasStartAllowed(date, startISO)) {
+      const error = 'Please choose a Christmas appointment start between 11:00 and 17:15 UK time.';
+      return NextResponse.json({ error, message: error }, { status: 400 });
+    }
 
     assertEnv('GOOGLE_CALENDAR_ID');
 

@@ -12,6 +12,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { customsearch } from 'googleapis/build/src/apis/customsearch';
 import { normalizeUKMobile, firstContactEmail, savedBookingContact, validateBookingContact } from '@lib/contactDetails';
+import { dayWindow, build15MinGrid as scheduleStartLabels, isChristmasOpeningDate } from '@lib/bookingSchedule';
 
 // --- Config ---
 const OPEN_DAYS = [3, 4, 5, 6] as const; // Wed(3)-Sat(6)
@@ -90,7 +91,7 @@ function buildOpenDatesForMonth(viewMonth: Date, minISO: string): string[] {
     const d = new Date(y, m, day);
     const iso = toInputDate(d);
     if (iso < minISO) continue;
-    if (isOpenDow(d.getDay())) out.push(iso);
+    if (dayWindow(iso)) out.push(iso);
   }
   return out;
 }
@@ -99,7 +100,7 @@ function buildOpenDatesForMonth(viewMonth: Date, minISO: string): string[] {
 // Return next open date in YYYY-MM-DD (for <input type="date">)
 function nextOpenISO(from = new Date()): string {
   const d = new Date(from);
-  while (!OPEN_DAYS.includes(d.getDay() as (typeof OPEN_DAYS)[number])) {
+  while (!dayWindow(toInputDate(d))) {
     d.setDate(d.getDate() + 1);
   }
   return toInputDate(d);
@@ -296,7 +297,7 @@ useEffect(() => {
   const [checkingContact, setCheckingContact] = useState(false);
   const [redirectingToPayment, setRedirectingToPayment] = useState(false);
   const durationMins = Number(serviceDuration ?? 30); //fallback if query param missing
-  const isDisabled = pending || checkingContact || !barber || !selectedDate || !selectedTime || !OPEN_DAYS.includes(dayIdx as any);
+  const isDisabled = pending || checkingContact || !barber || !selectedDate || !selectedTime || !dayWindow(selectedDate);
   const router = useRouter();
 
 const [showConfirm, setShowConfirm] = useState(false);
@@ -341,6 +342,7 @@ const [calendarRetry, setCalendarRetry] = useState(0);
 
 // True while any visible day is still loading
 const visibleCalendarDates = buildOpenDatesForMonth(viewMonth, isoTodayUK());
+const extraOpeningDates = visibleCalendarDates.filter(isChristmasOpeningDate);
 const isCalendarLoading = visibleCalendarDates.some(
   (iso) => dayStatus[iso] === undefined || dayStatus[iso] === 'loading'
 );
@@ -427,14 +429,8 @@ const [pendingContact, setPendingContact] = useState<{
   paymentMethod: 'pay_now' | 'pay_later';
 } | null>(null);
 
-  // Start time differs for Saturday
-  const slots = useMemo(() => {
-    if (!selectedDate) return [];
-    const isSaturday = dayIdx === 6;
-    const [sh, sm] = isSaturday ? [9, 0] : [9, 30];   // Sat 09:00, Wed-Fri 09:30
-    const [eh, em] = isSaturday ? [17, 15] : [19, 15];                        // Sat 17:15, else 19:15
-    return buildSlots(sh, sm, eh, em);
-  }, [dayIdx, selectedDate]);
+    // Client and server use the same first/last permitted start times.
+    const slots = useMemo(() => selectedDate ? scheduleStartLabels(selectedDate) : [], [selectedDate]);
 
   const sections = useMemo(() => sectionize(slots), [slots]);
 
@@ -465,7 +461,7 @@ useEffect(() => {
         }
         return;
       }
-      if (!OPEN_DAYS.includes(dayIdx as any) || !barber) {
+      if (!dayWindow(selectedDate) || !barber) {
         if (!cancelled) {
           setAvailable([]);
           setLoadingAvail(false);
@@ -924,16 +920,16 @@ async function handleBook(selectedPaymentMethod: 'pay_now' | 'pay_later') {
 </button>
             </div>
             
-            {selectedDate && !OPEN_DAYS.includes(isoToLocalDate(selectedDate).getDay() as (typeof OPEN_DAYS)[number]) && (
+            {selectedDate && !dayWindow(selectedDate) && (
 
-              <p className="mt-2 text-xs text-red-700">We're closed on this day. Please choose Wed-Sat.
+              <p className="mt-2 text-xs text-red-700">We're closed on this day. Please choose an available opening date.
               </p>
             )}
           </label>
         </section>
 
            {/* Toggle: Show all times vs only available */}
-        {selectedDate && OPEN_DAYS.includes(dayIdx as any) && barber && (
+        {selectedDate && dayWindow(selectedDate) && barber && (
           <div className="mt-4 flex items-center justify-end">
             <button
               type="button"
@@ -947,14 +943,14 @@ async function handleBook(selectedPaymentMethod: 'pay_now' | 'pay_later') {
 
 
         {/* Closed day message */}
-        {!selectedDate ? null : !OPEN_DAYS.includes(dayIdx as any) ? (
+        {!selectedDate ? null : !dayWindow(selectedDate) ? (
           <p className="mt-6 text-brown/70 text-sm">No slots: we're closed on {weekdayLabel(selectedDate)}.</p>
         ) : (
           <>
         
 
           {/* Show loader while we fetch availability */}
-{selectedDate && loadingAvail && OPEN_DAYS.includes(dayIdx as any) && barber && (
+{selectedDate && loadingAvail && dayWindow(selectedDate) && barber && (
   <div className="mt-6 rounded-2xl bg-white border border-brown/10 p-4 flex items-center gap-3">
     <div className="h-5 w-5 rounded-full border-2 border-brown/20 border-t-brown animate-spin" />
     <p className="text-sm text-brown">Checking available times…</p>
@@ -1414,7 +1410,7 @@ async function handleBook(selectedPaymentMethod: 'pay_now' | 'pay_later') {
     />
 
     {/* modal */}
-    <div className="relative w-full sm:max-w-md bg-white rounded-t-2xl sm:rounded-2xl shadow-xl border border-brown/10 p-5 mx-auto">
+    <div className="relative w-full sm:max-w-md max-h-[90dvh] overflow-y-auto bg-white rounded-t-2xl sm:rounded-2xl shadow-xl border border-brown/10 p-5 mx-auto">
       <div className="flex items-center justify-between">
         <button
           type="button"
@@ -1438,7 +1434,7 @@ async function handleBook(selectedPaymentMethod: 'pay_now' | 'pay_later') {
       </div>
 
       <p className="mt-3 text-xs text-brown/70">
-        Select a day (Wed–Sat only). Fully booked days show a 🚫.
+        {extraOpeningDates.length ? 'Select a day. Extra Christmas opening days are listed below.' : 'Select a day (Wed–Sat only).'} Fully booked days show a 🚫.
       </p>
 
       {hasCalendarErrors && !isCalendarLoading && (
@@ -1483,7 +1479,7 @@ async function handleBook(selectedPaymentMethod: 'pay_now' | 'pay_later') {
     if (!dates.length) {
       return (
         <div className="mt-4 text-sm text-brown/70">
-          No available Wed–Sat dates in this month.
+          No available opening dates in this month.
         </div>
       );
     }
@@ -1519,13 +1515,7 @@ for (let day = 1; day <= lastDay; day++) {
 // Push last partial row (if it has any dates)
 if (row.some(Boolean)) rows.push(row);
 
-return (
-  <div className="mt-3 space-y-2">
-    {rows.map((r, idx) => (
-      <div key={idx} className="grid grid-cols-4 gap-2">
-        {r.map((iso, colIdx) => {
-          if (!iso) return <div key={`blank-${idx}-${colIdx}`} />;
-
+const renderCalendarDate = (iso: string, label?: string) => {
           const dayNum = Number(iso.slice(8, 10));
           const status = dayStatus[iso];
           const isFull = status === 'full';
@@ -1536,7 +1526,7 @@ return (
               key={iso}
               type="button"
               disabled={isFull || isMaintenance}
-              aria-label={isMaintenance ? `${dayNum}: temporarily unavailable until noon UK time on 25 October` : status === 'error' ? `${dayNum}: availability not checked` : undefined}
+              aria-label={isMaintenance ? `${dayNum}: temporarily unavailable until noon UK time on 25 October` : status === 'error' ? `${label || dayNum}: availability not checked` : undefined}
               onClick={() => {
                 if (holdId) {
                   try { void fetch(`/api/holds?holdId=${encodeURIComponent(holdId)}`, { method: 'DELETE' }); } catch {}
@@ -1554,13 +1544,33 @@ return (
                     : 'bg-white border-brown/20 text-brown hover:border-brown/40'
                 }`}
             >
-              <span>{dayNum}</span>
+              <span>{label || dayNum}</span>
               {isFull ? <span aria-hidden>🚫</span> : null}
             </button>
           );
+};
+
+
+return (
+  <div className="mt-3 space-y-2">
+    {rows.map((r, idx) => (
+      <div key={idx} className="grid grid-cols-4 gap-2">
+        {r.map((iso, colIdx) => {
+          if (!iso) return <div key={`blank-${idx}-${colIdx}`} />;
+
+          return renderCalendarDate(iso);
         })}
       </div>
     ))}
+    {extraOpeningDates.length > 0 && (
+      <section className="mt-4 border-t border-brown/20 pt-3" aria-label="Extra Christmas opening days">
+        <h3 className="font-semibold text-brown">Extra Christmas opening days</h3>
+        <p className="mt-1 text-xs text-brown/70">11 a.m.–6 p.m. UK time. Last appointment starts at 5:15 p.m.</p>
+        <div className="mt-2 grid grid-cols-2 gap-2">
+          {extraOpeningDates.map(iso => renderCalendarDate(iso, `${weekdayLabel(iso)} ${Number(iso.slice(8, 10))}`))}
+        </div>
+      </section>
+    )}
   </div>
 );
   })()

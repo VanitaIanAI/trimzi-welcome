@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { adminDb } from '@lib/firebaseAdmin';
 import { addMinutes, fetchBusyIntervals, overlaps, toDateAt } from '@lib/availability';
+import { build15MinGrid, isChristmasOpeningDate, isChristmasStartAllowed } from '@lib/bookingSchedule';
 
 export const dynamic = 'force-dynamic';
 
@@ -10,6 +11,10 @@ export async function POST(req: Request) {
   if (!date || !time) return NextResponse.json({ error: 'date and time required' }, { status: 400 });
 
   const start = toDateAt(date, time);
+  if ((isChristmasOpeningDate(date) && !build15MinGrid(date).includes(time)) ||
+      (Number.isFinite(start.getTime()) && !isChristmasStartAllowed(date, start.toISOString()))) {
+    return NextResponse.json({ ok: false, reason: 'Please choose a Christmas appointment start between 11:00 and 17:15 UK time.' }, { status: 400 });
+  }
   const end45 = addMinutes(start, 45);
   const holdExpiresAt = addMinutes(new Date(), 2); // 2-minute hold
 

@@ -60,28 +60,8 @@ export function overlaps(a: BusyInterval, b: BusyInterval) {
   return a.start < b.end && b.start < a.end;
 }
 
-// Use your existing windows: Wed–Fri 09:30–19:15, Sat 09:00–17:15
-export function dayWindow(dateISO: string): { startLabel: string; endLabel: string } | null {
-  const d = new Date(dateISO);
-  const dow = d.getDay(); // Sun=0
-  if (dow === 6)  return { startLabel: '09:00', endLabel: '17:15' };
-  if (dow >= 3 && dow <= 5) return { startLabel: '09:30', endLabel: '19:15' };
-  return null; // closed
-}
-
-export function build15MinGrid(dateISO: string) {
-  const w = dayWindow(dateISO);
-  if (!w) return [] as string[];
-
-  const startMin = labelToMinutes(w.startLabel); // e.g. "09:30" -> 570
-  const endMin   = labelToMinutes(w.endLabel);   // e.g. "19:15" -> 1155
-
-  const slots: string[] = [];
-  for (let m = startMin; m <= endMin; m += 15) {
-    slots.push(minutesToLabel(m));
-  }
-  return slots;
-}
+// Keep the existing grid API; schedule data is also safe to import in the browser.
+export { dayWindow, build15MinGrid } from '@lib/bookingSchedule';
 
 // Busy intervals from Google Calendar for that day using FreeBusy API
 export async function fetchBusyIntervals(dateISO: string): Promise<BusyInterval[]> {
