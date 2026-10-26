@@ -8,25 +8,19 @@ import { addMinutes, fetchBusyIntervals, overlaps } from '@lib/availability';
 import { signCancelToken } from '@lib/token';
 import { randomUUID } from 'crypto';
 import { Resend } from 'resend';
+import { validateBookingContact } from '@lib/contactDetails';
 
 export async function POST(req: Request) {
   try {
-    assertEnv('GOOGLE_CALENDAR_ID');
-
-  const resend =
-  process.env.RESEND_API_KEY
-    ? new Resend(process.env.RESEND_API_KEY)
-    : null;
-
     const body = await req.json();
     const {
       summary,
       description,
       startISO,
-      attendeeEmail,
+      attendeeEmail: rawAttendeeEmail,
       barberName,
-      customerName,
-      customerPhone,
+      customerName: rawCustomerName,
+      customerPhone: rawCustomerPhone,
       holdId,
       date,
       noteText,
@@ -51,6 +45,21 @@ export async function POST(req: Request) {
     if (!summary || !startISO || !date) {
       return NextResponse.json({ error: 'summary, date and startISO are required' }, { status: 400 });
     }
+
+    const validation = validateBookingContact({
+      name: rawCustomerName, phone: rawCustomerPhone, email: rawAttendeeEmail,
+    });
+    if (!validation.ok) {
+      return NextResponse.json({ error: validation.error, message: validation.error }, { status: 400 });
+    }
+    const { name: customerName, phone: customerPhone, email: attendeeEmail } = validation.contact;
+
+    assertEnv('GOOGLE_CALENDAR_ID');
+
+  const resend =
+  process.env.RESEND_API_KEY
+    ? new Resend(process.env.RESEND_API_KEY)
+    : null;
 
 // Normalise payment metadata – older clients may not send it
     const normalisedPaymentMethod: 'pay_now' | 'pay_later' =

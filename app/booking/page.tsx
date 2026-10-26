@@ -11,6 +11,7 @@ import { setDoc, doc, serverTimestamp, getDoc } from 'firebase/firestore';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { customsearch } from 'googleapis/build/src/apis/customsearch';
+import { normalizeUKMobile, firstContactEmail, savedBookingContact, validateBookingContact } from '@lib/contactDetails';
 
 // --- Config ---
 const OPEN_DAYS = [3, 4, 5, 6] as const; // Wed(3)-Sat(6)
@@ -262,23 +263,10 @@ function isSlotInPast(dateISO: string, timeHHMM: string) {
 }
 
 
-// --- Phone helpers (UK mobile) ---
-// Accepts "07XXXXXXXXX" or "+447XXXXXXXXX". Returns normalized E.164 ("+44XXXXXXXXXX") if valid, else null.
-function normalizeUKMobile(raw: string): string | null {
-  const p = raw.replace(/[^\d+]/g, ''); // keep digits and a single leading +
-  // +44 7XXXXXXXXX
-  if (/^\+447\d{9}$/.test(p)) return p;
-  // 07XXXXXXXXX  -> +44XXXXXXXXXX
-  if (/^07\d{9}$/.test(p)) return p.replace(/^0/, '+44');
-  return null;
-}
-
-// Looser check for instant feedback (allows spaces/dashes)
+// Use the same UK mobile check for inline feedback and final validation.
 function looksLikeUKMobile(raw: string): boolean {
-  const p = raw.replace(/[^\d+]/g, '');
-  return /^\+447\d{9}$/.test(p) || /^07\d{9}$/.test(p);
+  return normalizeUKMobile(raw) !== null;
 }
-
 
 function BookingContent() {
   const octoberMaintenance = useOctoberMaintenance();
@@ -305,9 +293,10 @@ useEffect(() => {
 }, [barberParam]);
   const [selectedTime, setSelectedTime] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
+  const [checkingContact, setCheckingContact] = useState(false);
   const [redirectingToPayment, setRedirectingToPayment] = useState(false);
   const durationMins = Number(serviceDuration ?? 30); //fallback if query param missing
-  const isDisabled = pending || !barber || !selectedDate || !selectedTime || !OPEN_DAYS.includes(dayIdx as any);
+  const isDisabled = pending || checkingContact || !barber || !selectedDate || !selectedTime || !OPEN_DAYS.includes(dayIdx as any);
   const router = useRouter();
 
 const [showConfirm, setShowConfirm] = useState(false);
@@ -358,12 +347,13 @@ const isCalendarLoading = visibleCalendarDates.some(
 
 const hasCalendarErrors = visibleCalendarDates.some((iso) => dayStatus[iso] === 'error');
 
-// --- Contact details modal state (for users without phone) ---
+// --- Contact details modal state (for missing or invalid contact details) ---
 const [showContactModal, setShowContactModal] = useState(false);
 const [contactName, setContactName] = useState('');
 const [contactPhone, setContactPhone] = useState('');
 const [contactEmail, setContactEmail] = useState('');
 const [savingContact, setSavingContact] = useState(false);
+const [contactError, setContactError] = useState('');
 
 // --- Optional "note to barber" modal state ---
 const [showNoteModal, setShowNoteModal] = useState(false);
@@ -646,10 +636,16 @@ async function submitBookingWith(
     // pay_now bookings will move to "paid".
     const initialPaymentStatus: 'unpaid' | 'paid' | 'partially_paid' = 'unpaid';
 
-// Determine attendee email from the current user (only if not anonymous)
+// Prefer details explicitly supplied for this attempt, with account email as fallback.
 const uForEmail = auth.currentUser;
-const attendeeEmail =
-  uForEmail && !uForEmail.isAnonymous ? (uForEmail.email ?? null) : (attendeeEmailOverride ?? null);
+const attendeeEmail = firstContactEmail(
+  attendeeEmailOverride,
+  uForEmail && !uForEmail.isAnonymous ? uForEmail.email : null
+);
+const validation = validateBookingContact({ name: customerName, phone: customerPhone, email: attendeeEmail });
+if (!validation.ok) throw new Error(validation.error);
+customerName = validation.contact.name;
+customerPhone = validation.contact.phone;
 
     // POST to your API route
     // Call your existing booking API first
@@ -675,7 +671,7 @@ const attendeeEmail =
 
     const json = await res.json();
     if (!res.ok || !json.ok) {
-      throw new Error(json.message || 'Booking failed');
+      throw new Error(json.error || json.message || 'Booking failed');
     }
 
     const eventId: string | null =
@@ -791,59 +787,66 @@ const attendeeEmail =
 
 
 
+async function handleSaveContact() {
+  if (savingContact) return;
+  setContactError('');
+  const validation = validateBookingContact({ name: contactName, phone: contactPhone, email: contactEmail });
+  if (!validation.ok) {
+    setContactError(validation.error);
+    return;
+  }
+  setSavingContact(true);
+  try {
+    const u = auth.currentUser;
+    const contact = validation.contact;
+    if (u) {
+      await setDoc(doc(db, 'profiles', u.uid), contact, { merge: true });
+    }
+    setShowContactModal(false);
+    setPendingContact({ ...contact, paymentMethod: pendingPaymentMethod ?? 'pay_later' });
+    setShowNoteModal(true);
+  } catch (e) {
+    console.error('Contact details save failed:', e);
+    setContactError('Could not save contact details. Please try again.');
+  } finally {
+    setSavingContact(false);
+  }
+}
+
 async function handleBook(selectedPaymentMethod: 'pay_now' | 'pay_later') {
-  // remember which option this attempt is using, so the contact modal can pick it up
+  if (pending || checkingContact || savingContact) return;
   setPendingPaymentMethod(selectedPaymentMethod);
   if (!selectedDate || !selectedTime) {
     alert('Please choose a date and a time first.');
     return;
   }
-
-  // Before submitting, check if we have contact info
-  const u = auth.currentUser;
-  let existingName = '';
-  let existingPhone = '';
-
-  if (u && !u.isAnonymous) {
-    // Try profile doc
-    try {
+  setCheckingContact(true);
+  try {
+    const u = auth.currentUser;
+    let contact = { name: '', phone: '', email: '' };
+    if (u && !u.isAnonymous) {
+      // A failed read must not be treated as an empty profile and overwritten.
       const snap = await getDoc(doc(db, 'profiles', u.uid));
-      if (snap.exists()) {
-        const p = snap.data() as any;
-        existingName = (u.displayName || p?.name || '').trim();
-        existingPhone = (p?.phone || '').trim();
-      } else {
-        existingName = (u.displayName || '').trim();
-      }
-    } catch {
-      existingName = (u.displayName || '').trim();
+      contact = savedBookingContact(snap.exists() ? snap.data() : {}, u);
     }
-  } else {
-    // Guest: no guaranteed name/phone
-    existingName = '';
-    existingPhone = '';
+    const validation = validateBookingContact(contact);
+    if (!validation.ok) {
+      setContactName(contact.name);
+      setContactPhone(contact.phone);
+      setContactEmail(contact.email);
+      setContactError('');
+      setShowContactModal(true);
+      return;
+    }
+    setPendingContact({ ...validation.contact, paymentMethod: selectedPaymentMethod });
+    setShowNoteModal(true);
+  } catch (e) {
+    console.error('Contact details lookup failed:', e);
+    alert('Could not load your contact details. Please try booking again.');
+  } finally {
+    setCheckingContact(false);
   }
-
-  // If we don't have a phone, open modal and let them provide it
-  if (!existingPhone) {
-    setContactName(existingName || '');
-    setContactPhone('');           // blank to prompt entry
-    setShowContactModal(true);
-    return; // wait for modal's "Save & continue"
-  }
-
- // We have a phone already – ask for an optional note before submitting
-  setPendingContact({
-    name: existingName,
-    phone: existingPhone,
-    email: contactEmail,
-    paymentMethod: selectedPaymentMethod,
-  });
-  setShowNoteModal(true);
-  return;
-
 }
-
 
 
   return (
@@ -1072,26 +1075,29 @@ async function handleBook(selectedPaymentMethod: 'pay_now' | 'pay_later') {
         </>
         )}
 
-{/* Contact details required (if no phone on profile) */}
+{/* Complete missing contact details without leaving the booking page. */}
 {showContactModal ? (
   <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center">
     {/* backdrop */}
     <div
       className="absolute inset-0 bg-black/40"
-      onClick={() => setShowContactModal(false)}
+      onClick={() => { if (!savingContact) setShowContactModal(false); }}
     />
     {/* modal */}
-    <div className="relative w-full sm:max-w-md bg-white rounded-t-2xl sm:rounded-2xl shadow-xl border border-brown/10 p-5 mx-auto">
-      <h2 className="text-brown text-lg font-semibold mb-2">Contact details required</h2>
+    <div role="dialog" aria-modal="true" aria-labelledby="contact-details-title" className="relative w-full sm:max-w-md bg-white rounded-t-2xl sm:rounded-2xl shadow-xl border border-brown/10 p-5 mx-auto">
+      <h2 id="contact-details-title" className="text-brown text-lg font-semibold mb-2">Contact details required</h2>
       <p className="text-brown/80 text-sm mb-4">
-        No login needed to make a booking, but we need an email address to confirm your booking and contact name and number in case the barber needs to reach you.
+        {auth.currentUser && !auth.currentUser.isAnonymous
+          ? 'Please complete any missing details below. We will save them to your profile for future bookings.'
+          : 'No login needed to make a booking, but we need your name, mobile number and email address to confirm your booking and contact you if needed.'}
       </p>
 
       <div className="space-y-3">
         <div>
-          <label className="block text-sm mb-1">Name</label>
+          <label htmlFor="contact-name" className="block text-sm mb-1">Name</label>
           <input
             className="w-full rounded-md border border-brown/20 bg-ivory px-3 py-2 text-sm"
+            id="contact-name"
             value={contactName}
             onChange={(e) => setContactName(e.target.value)}
             placeholder="Your name"
@@ -1099,12 +1105,13 @@ async function handleBook(selectedPaymentMethod: 'pay_now' | 'pay_later') {
           />
         </div>
         <div>
-          <label className="block text-sm mb-1">Mobile number</label>
+          <label htmlFor="contact-phone" className="block text-sm mb-1">Mobile number</label>
           <input
   type="tel"
   inputMode="tel"
  
   className="w-full rounded-md border border-brown/20 bg-ivory px-3 py-2 text-sm"
+  id="contact-phone"
   value={contactPhone}
   onChange={(e) => setContactPhone(e.target.value)}
   placeholder="+44 7XXXXXXXXX or 07XXXXXXXXX"
@@ -1112,10 +1119,11 @@ async function handleBook(selectedPaymentMethod: 'pay_now' | 'pay_later') {
 />
         </div>
         <div>
-  <label className="block text-sm mb-1">Email address</label>
+  <label htmlFor="contact-email" className="block text-sm mb-1">Email address</label>
   <input
     type="email"
     className="w-full rounded-md border border-brown/20 bg-ivory px-3 py-2 text-sm"
+    id="contact-email"
     value={contactEmail}
     onChange={(e) => setContactEmail(e.target.value)}
     placeholder="you@example.com"
@@ -1124,60 +1132,14 @@ async function handleBook(selectedPaymentMethod: 'pay_now' | 'pay_later') {
 </div>
       </div>
 
+      {contactError && <p role="alert" className="mt-3 text-sm text-red-700">{contactError}</p>}
+
       <div className="mt-5 flex gap-3">
         <button
           type="button"
           disabled={savingContact}
           className="flex-1 h-12 rounded-xl bg-brown text-white font-semibold hover:bg-brown/90 disabled:opacity-60"
-          onClick={async () => {
-  if (!contactName.trim()) {
-    alert('Please enter your name.');
-    return;
-  }
-
-  const normalized = normalizeUKMobile(contactPhone.trim());
-
-  if (!normalized) {
-    alert('Please enter a valid UK mobile number (07XXXXXXXXX or +447XXXXXXXXX).');
-    return;
-  }
-
-  if (!contactEmail || !contactEmail.includes('@')) {
-  alert('Please enter a valid email address.');
-  return;
-}
-
-  setSavingContact(true);
-  try {
-    const u = auth.currentUser;
-    if (u) {
-      // Save normalized E.164 into profiles/{uid}
-      await setDoc(
-        doc(db, 'profiles', u.uid),
-        { name: contactName.trim(), phone: normalized },
-        { merge: true }
-      );
-    }
-    setShowContactModal(false);
-
-    // Decide which payment method this booking will use (fallback to 'pay_later' just in case)
-    const method: 'pay_now' | 'pay_later' = pendingPaymentMethod ?? 'pay_later';
-
-    // After we have contact details, ask for an optional note
-    setPendingContact({
-      name: contactName.trim(),
-      phone: normalized,
-      email: contactEmail.trim(),
-      paymentMethod: method,
-    });
-    setShowNoteModal(true);
-  } catch (e) {
-    console.error(e);
-    alert('Could not save contact details. Please try again.');
-  } finally {
-    setSavingContact(false);
-  }
-}}
+          onClick={handleSaveContact}
 
         >
           {savingContact ? 'Saving...' : 'Save & continue'}
@@ -1185,8 +1147,9 @@ async function handleBook(selectedPaymentMethod: 'pay_now' | 'pay_later') {
 
         <button
           type="button"
+          disabled={savingContact}
           className="h-12 rounded-xl px-4 border border-brown/20 text-brown hover:bg-ivory/80"
-          onClick={() => setShowContactModal(false)}
+          onClick={() => { if (!savingContact) setShowContactModal(false); }}
         >
           Cancel
         </button>

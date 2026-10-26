@@ -26,7 +26,8 @@ import {
   UserCredential,
   sendPasswordResetEmail,
 } from 'firebase/auth';
-import { doc, setDoc, serverTimestamp } from 'firebase/firestore';
+import { doc, runTransaction, serverTimestamp } from 'firebase/firestore';
+import { signInContactPatch } from '@lib/contactDetails';
 
 // Temporary October 2026 maintenance; noon UK time is GMT on 25 October.
 const OCTOBER_REOPEN_AT = Date.parse('2026-10-25T12:00:00Z');
@@ -57,11 +58,16 @@ async function ensureProfile(
   uid: string,
   data?: Partial<{ name: string; email: string; phone: string }>
 ) {
-  await setDoc(
-    doc(db, 'profiles', uid),
-    { createdAt: serverTimestamp(), ...data },
-    { merge: true }
-  );
+  const profileRef = doc(db, 'profiles', uid);
+  await runTransaction(db, async transaction => {
+    const snap = await transaction.get(profileRef);
+    const existing = snap.exists() ? snap.data() : {};
+    transaction.set(
+      profileRef,
+      { createdAt: serverTimestamp(), ...signInContactPatch(existing, data) },
+      { merge: true }
+    );
+  });
 }
 
 export default function Onboarding() {
