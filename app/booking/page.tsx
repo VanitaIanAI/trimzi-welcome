@@ -294,10 +294,13 @@ useEffect(() => {
 }, [barberParam]);
   const [selectedTime, setSelectedTime] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
+  const [changingSlot, setChangingSlot] = useState(false);
+  const changingSlotRef = useRef(false);
+  const [slotError, setSlotError] = useState('');
   const [checkingContact, setCheckingContact] = useState(false);
   const [redirectingToPayment, setRedirectingToPayment] = useState(false);
   const durationMins = Number(serviceDuration ?? 30); //fallback if query param missing
-  const isDisabled = pending || checkingContact || !barber || !selectedDate || !selectedTime || !dayWindow(selectedDate);
+  const isDisabled = pending || checkingContact || changingSlot || !barber || !selectedDate || !selectedTime || !dayWindow(selectedDate);
   const router = useRouter();
 
 const [showConfirm, setShowConfirm] = useState(false);
@@ -450,6 +453,7 @@ useEffect(() => {
 // Fetch availability when date/barber changes
   useEffect(() => {
     if (!hasCheckedStoredHold) return;
+    setSlotError('');
 
     let cancelled = false;
 
@@ -810,7 +814,7 @@ async function handleSaveContact() {
 }
 
 async function handleBook(selectedPaymentMethod: 'pay_now' | 'pay_later') {
-  if (pending || checkingContact || savingContact) return;
+  if (pending || checkingContact || savingContact || changingSlotRef.current) return;
   setPendingPaymentMethod(selectedPaymentMethod);
   if (!selectedDate || !selectedTime) {
     alert('Please choose a date and a time first.');
@@ -819,7 +823,7 @@ async function handleBook(selectedPaymentMethod: 'pay_now' | 'pay_later') {
   setCheckingContact(true);
   try {
     const u = auth.currentUser;
-    let contact = { name: '', phone: '', email: '' };
+    let contact = { name: contactName, phone: contactPhone, email: contactEmail };
     if (u && !u.isAnonymous) {
       // A failed read must not be treated as an empty profile and overwritten.
       const snap = await getDoc(doc(db, 'profiles', u.uid));
@@ -907,7 +911,9 @@ async function handleBook(selectedPaymentMethod: 'pay_now' | 'pay_later') {
               
               <button
   type="button"
+  disabled={changingSlot}
   onClick={() => {
+    if (changingSlotRef.current) return;
     const d = selectedDate ? new Date(`${selectedDate}T00:00:00`) : new Date();
     d.setDate(1);
     d.setHours(0, 0, 0, 0);
@@ -948,6 +954,9 @@ async function handleBook(selectedPaymentMethod: 'pay_now' | 'pay_later') {
         ) : (
           <>
         
+
+          {slotError && <p role="alert" className="mt-4 text-sm text-red-700">{slotError}</p>}
+          {changingSlot && <p role="status" className="mt-4 text-sm text-brown">Updating your selected time…</p>}
 
           {/* Show loader while we fetch availability */}
 {selectedDate && loadingAvail && dayWindow(selectedDate) && barber && (
@@ -1001,55 +1010,88 @@ async function handleBook(selectedPaymentMethod: 'pay_now' | 'pay_later') {
                     <button
                       key={t}
                       type="button"
-                      disabled={!isValid || pending || isPast}
+                      disabled={!isValid || pending || changingSlot || isPast}
                       onClick={async () => {
-                        if (!isValid || isPast) return;
-
-                        // release previous hold (if any)
-                        if (holdId) {
-                          try { await fetch(`/api/holds?holdId=${encodeURIComponent(holdId)}`, { method: 'DELETE' }); } catch {}
-                        }
-
-                        clearPersistedHold();
-                        setSelectedTime(t);
-
+                        if (!isValid || isPast || changingSlotRef.current) return;
+                        changingSlotRef.current = true;
+                        setChangingSlot(true);
+                        setSlotError('');
                         try {
-                          const res = await fetch('/api/holds', {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ date: selectedDate, time: t, barber }),
-                          });
-                          const json = await res.json();
-                          if (!res.ok || !json.ok) {
-                            alert(json.reason || 'That slot just went unavailable.');
-                            // refresh availability
-                            const r2 = await fetch(`/api/availability?date=${selectedDate}&barber=${encodeURIComponent(barber)}`);
-                            const j2 = await r2.json();
-                            setAvailable(j2.available || []);
+                          // Release the old hold before deselecting or reserving another time.
+                          if (holdId) {
+                            try {
+                              const released = await fetch(`/api/holds?holdId=${encodeURIComponent(holdId)}`, { method: 'DELETE' });
+                              if (!released.ok) throw new Error('Hold release failed');
+                            } catch (e) {
+                              console.error('Hold release failed:', e);
+                              setSlotError('Could not release your selected time. Please try again.');
+                              return;
+                            }
+                          }
+
+                          if (selectedTime === t) {
+                            clearPersistedHold();
                             setSelectedTime(null);
+                            setLoadingAvail(true);
+                            try {
+                              const res = await fetch(`/api/availability?date=${selectedDate}&barber=${encodeURIComponent(barber)}`);
+                              const json = await res.json();
+                              if (!res.ok || !Array.isArray(json.available)) throw new Error('Availability refresh failed');
+                              setAvailable(json.available);
+                            } catch (e) {
+                              console.error('Availability refresh after deselection failed:', e);
+                              setAvailable([]);
+                              setSlotError('Your time was released, but available times could not be refreshed. Please refresh the page to try again.');
+                            } finally {
+                              setLoadingAvail(false);
+                            }
                             return;
                           }
-                          setHoldId(json.holdId);
-                          setHoldExpiry(Date.parse(json.expiresAt));
-                          persistActiveHold({
-                            holdId: json.holdId,
-                            holdExpiry: Date.parse(json.expiresAt),
-                            selectedDate,
-                            selectedTime: t,
-                            barber,
-                          });
+
+                          clearPersistedHold();
+                          setSelectedTime(t);
 
                           try {
-                            const availRes = await fetch(`/api/availability?date=${selectedDate}&barber=${encodeURIComponent(barber)}`);
-                            const availJson = await availRes.json();
-                            setAvailable(availJson.available || []);
+                            const res = await fetch('/api/holds', {
+                              method: 'POST',
+                              headers: { 'Content-Type': 'application/json' },
+                              body: JSON.stringify({ date: selectedDate, time: t, barber }),
+                            });
+                            const json = await res.json();
+                            if (!res.ok || !json.ok) {
+                              alert(json.reason || 'That slot just went unavailable.');
+                              // refresh availability
+                              const r2 = await fetch(`/api/availability?date=${selectedDate}&barber=${encodeURIComponent(barber)}`);
+                              const j2 = await r2.json();
+                              setAvailable(j2.available || []);
+                              setSelectedTime(null);
+                              return;
+                            }
+                            setHoldId(json.holdId);
+                            setHoldExpiry(Date.parse(json.expiresAt));
+                            persistActiveHold({
+                              holdId: json.holdId,
+                              holdExpiry: Date.parse(json.expiresAt),
+                              selectedDate,
+                              selectedTime: t,
+                              barber,
+                            });
+
+                            try {
+                              const availRes = await fetch(`/api/availability?date=${selectedDate}&barber=${encodeURIComponent(barber)}`);
+                              const availJson = await availRes.json();
+                              setAvailable(availJson.available || []);
+                            } catch (e) {
+                              console.error('Availability refresh after hold creation failed:', e);
+                            }
                           } catch (e) {
-                            console.error('Availability refresh after hold creation failed:', e);
+                            console.error(e);
+                            alert('Could not reserve the slot. Please try again.');
+                            setSelectedTime(null);
                           }
-                        } catch (e) {
-                          console.error(e);
-                          alert('Could not reserve the slot. Please try again.');
-                          setSelectedTime(null);
+                        } finally {
+                          changingSlotRef.current = false;
+                          setChangingSlot(false);
                         }
                       }}
                       className={`rounded-xl border px-3 py-2 text-sm transition
@@ -1160,16 +1202,8 @@ async function handleBook(selectedPaymentMethod: 'pay_now' | 'pay_later') {
     {/* backdrop */}
     <div
       className="absolute inset-0 bg-black/40"
-         onClick={() => {
-        // clicking backdrop = skip
+      onClick={() => {
         setShowNoteModal(false);
-        submitBookingWith(
-          pendingContact.name,
-          pendingContact.phone,
-          '',
-          pendingContact.email || null,
-          pendingContact.paymentMethod
-        );
         setPendingContact(null);
       }}
     />
@@ -1197,7 +1231,18 @@ async function handleBook(selectedPaymentMethod: 'pay_now' | 'pay_later') {
         </div>
       </div>
 
-      <div className="mt-5 flex gap-3">
+      <button
+        type="button"
+        className="mt-4 h-12 w-full rounded-xl px-4 border border-brown/20 text-brown hover:bg-ivory/80"
+        onClick={() => {
+          setShowNoteModal(false);
+          setPendingContact(null);
+        }}
+      >
+        Back to booking
+      </button>
+
+      <div className="mt-3 flex gap-3">
         <button
           type="button"
           className="h-12 rounded-xl px-4 border border-brown/20 text-brown hover:bg-ivory/80 flex-1"
