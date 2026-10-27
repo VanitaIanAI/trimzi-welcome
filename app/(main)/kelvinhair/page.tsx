@@ -25,6 +25,9 @@ const SALON_META = {
   name: 'Kelvinhair',
   address: '116 Queen Margaret Drive, Kelvinside, Glasgow G20 8NZ',
 };
+const mapDestination = encodeURIComponent(`${SALON_META.name}, ${SALON_META.address}`);
+const salonMapUrl = `https://www.google.com/maps/search/?api=1&query=${mapDestination}`;
+const salonDirectionsUrl = `https://www.google.com/maps/dir/?api=1&destination=${mapDestination}`;
 
 type InfoKind = 'scissor' | 'clipper' | null;
 
@@ -146,7 +149,7 @@ async function toggleFavourite() {
               <h2 className="text-2xl font-semibold text-brown">Kelvinhair</h2>
               <p className="mt-1 text-sm text-brown/80">
                 <a
-                  href="/maps/kelvinhair-map.png"
+                  href={salonMapUrl}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="hover:underline focus:underline"
@@ -154,6 +157,15 @@ async function toggleFavourite() {
                   116 Queen Margaret Drive, Kelvinside, Glasgow G20 8NZ
                 </a>
               </p>
+                <a
+                  href={salonDirectionsUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="mt-3 inline-flex min-h-11 items-center gap-2 rounded-xl bg-brown px-4 py-2 text-sm font-semibold text-white hover:bg-brown/90 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brown"
+                >
+                  Get directions <svg aria-hidden="true" viewBox="0 0 16 16" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M4 12 12 4M4 4h8v8" strokeLinecap="round" strokeLinejoin="round" /></svg>
+                  <span className="sr-only"> (opens Google Maps in a new tab)</span>
+                </a>
             </div>
 
  {/* right side: favourite toggle */}
