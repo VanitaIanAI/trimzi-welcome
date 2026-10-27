@@ -212,6 +212,21 @@ export default function ProfilePage() {
     }
   }
 
+  const profileLoadingView = (
+    <main className="mx-auto max-w-[720px] px-4 py-6 space-y-4">
+      <h1 className="text-2xl font-semibold text-brown">Profile</h1>
+      <section role="status" aria-busy="true" className="rounded-xl border border-brown/10 bg-white p-4 space-y-4">
+        <p className="text-brown/70 text-sm">Loading your profile…</p>
+        {[0, 1, 2].map(i => (
+          <div key={i} aria-hidden="true" className="space-y-2 motion-safe:animate-pulse">
+            <div className="h-3 w-24 rounded bg-brown/10" />
+            <div className="h-11 w-full rounded-xl bg-brown/5" />
+          </div>
+        ))}
+      </section>
+    </main>
+  );
+
   // Guests: show upgrade prompt (toolbar already hidden for guests)
   if (authReady && (!user || user.isAnonymous)) {
     return (
@@ -232,7 +247,7 @@ export default function ProfilePage() {
     );
   }
 
-  if (!mounted || !authReady) return null;
+  if (!mounted || !authReady) return profileLoadingView;
 
   if (profileLoadError) {
     return (
@@ -256,8 +271,8 @@ export default function ProfilePage() {
     );
   }
 
-  // Loading presentation is a separate change; keep the form hidden until safe.
-  if (!canEditProfile) return null;
+  // Show inert placeholders until the existing safeguard permits editing.
+  if (!canEditProfile) return profileLoadingView;
 
   return (
     <main className="mx-auto max-w-[720px] px-4 py-6 space-y-6">

@@ -13,6 +13,7 @@ export default function HomePage() {
   const [user, setUser] = useState<User | null>(null);
   const [profileName, setProfileName] = useState<string | null>(null);
   const [authReady, setAuthReady] = useState(false);
+  const [profileLoadedUid, setProfileLoadedUid] = useState<string | null>(null);
 
   // Simple sign-out handler
   const handleSignOut = async () => {
@@ -37,15 +38,21 @@ export default function HomePage() {
   // Load Firestore profile if signed in
   useEffect(() => {
     let cancelled = false;
+    setProfileLoadedUid(null);
+    setProfileName(null);
     async function loadProfile(uid: string) {
       try {
         const snap = await getDoc(doc(db, 'profiles', uid));
         if (!cancelled) {
           const name = snap.exists() ? (snap.data() as any).name ?? null : null;
           setProfileName(name);
+          setProfileLoadedUid(uid);
         }
       } catch {
-        if (!cancelled) setProfileName(null);
+        if (!cancelled) {
+          setProfileName(null);
+          setProfileLoadedUid(uid);
+        }
       }
     }
     if (user?.uid) loadProfile(user.uid);
@@ -53,11 +60,14 @@ export default function HomePage() {
     return () => { cancelled = true; };
   }, [user?.uid]);
 
+  // Wait for this account's profile before choosing a greeting name.
+  const profileReady = Boolean(user && profileLoadedUid === user.uid);
+
   // Greeting text (name > displayName > email prefix)
   const greetingName =
-    profileName ||
-    user?.displayName ||
-    (user?.email ? user.email.split('@')[0] : null);
+    profileReady
+      ? profileName || user?.displayName || (user?.email ? user.email.split('@')[0] : null)
+      : null;
 
   return (
     <div className="min-h-dvh bg-ivory pb-24">
@@ -69,10 +79,10 @@ export default function HomePage() {
           <div className="flex items-center gap-3">
             {!authReady ? (
               <span className="text-sm text-brown/60">Checking...</span>
-            ) : user && greetingName ? (
+            ) : user && (!profileReady || greetingName) ? (
               <div className="flex items-center gap-3">
               <span className="text-sm text-brown/80">
-                Welcome back, <strong>{greetingName}</strong>
+                Welcome back{greetingName && <>, <strong>{greetingName}</strong></>}
               </span>
               <button
                 onClick={handleSignOut}

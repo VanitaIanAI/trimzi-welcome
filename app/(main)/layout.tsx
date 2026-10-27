@@ -28,8 +28,18 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
   const isActive = (href: string) => pathname === href;
 
   return (
-    <div className={`min-h-dvh ${showToolbar ? 'pb-20' : ''} bg-ivory`}>
+    <div className={`min-h-dvh ${!authReady || showToolbar ? 'pb-20' : ''} bg-ivory`}>
       {children}
+
+      {!authReady && (
+        <div role="status" aria-busy="true" className="fixed bottom-0 inset-x-0 z-50 bg-brown text-white">
+          <div className="mx-auto max-w-[720px] h-16 flex items-center justify-center gap-3 px-4 text-sm">
+            <span aria-hidden="true" className="h-3 w-3 rounded-full bg-white/40 motion-safe:animate-pulse" />
+            Loading navigation…
+          </div>
+          <div className="h-[env(safe-area-inset-bottom)]" />
+        </div>
+      )}
 
       {/* Bottom toolbar (style-only update) */}
 {showToolbar && (

@@ -56,17 +56,19 @@ useEffect(() => {
 
         {/* States */}
 {!authReady || loading ? (
-  <section className="space-y-3" aria-busy="true" aria-live="polite">
+  <section role="status" className="space-y-3" aria-busy="true" aria-live="polite">
+    <p className="text-brown/70 text-sm">Loading your favourites…</p>
     {[0, 1].map((i) => (
       <div
         key={i}
-        className="rounded-xl border border-brown/10 bg-white p-4 flex items-center justify-between animate-pulse"
+        aria-hidden="true"
+        className="rounded-xl border border-brown/10 bg-white p-4 flex items-center justify-between gap-3 motion-safe:animate-pulse"
       >
-        <div className="flex-1">
-          <div className="h-4 w-40 bg-brown/10 rounded mb-2" />
-          <div className="h-3 w-64 bg-brown/10 rounded" />
+        <div className="flex-1 min-w-0">
+          <div className="h-4 w-40 max-w-full bg-brown/10 rounded mb-2" />
+          <div className="h-3 w-64 max-w-full bg-brown/10 rounded" />
         </div>
-        <div className="h-8 w-20 bg-brown/10 rounded-md" />
+        <div className="h-8 w-16 shrink-0 bg-brown/10 rounded-md" />
       </div>
     ))}
   </section>

@@ -32,6 +32,7 @@ export default function BookingsPage() {
   const [authReady, setAuthReady] = useState(false);
   const [loading, setLoading] = useState(true);
   const [items, setItems] = useState<Booking[]>([]);
+  const [displayReadyUid, setDisplayReadyUid] = useState<string | null>(null);
   // add alongside: const [user], [authReady], [loading], [items], etc.
 const [cancellingId, setCancellingId] = useState<string | null>(null);
 
@@ -80,10 +81,12 @@ const [cancellingId, setCancellingId] = useState<string | null>(null);
           };
         });
         setItems(rows);
+        setDisplayReadyUid(user.uid);
         setLoading(false);
       },
       () => {
         setItems([]);
+        setDisplayReadyUid(user.uid);
         setLoading(false);
       }
     );
@@ -139,14 +142,21 @@ const [cancellingId, setCancellingId] = useState<string | null>(null);
         )}
 
         {/* Loading state */}
-        {authReady && user && !user.isAnonymous && loading && (
-          <section className="rounded-xl bg-white border border-brown/10 p-5">
+        {(!authReady || (user && !user.isAnonymous && (loading || displayReadyUid !== user.uid))) && (
+          <section role="status" aria-busy="true" className="space-y-3">
             <p className="text-brown/70 text-sm">Loading your bookings…</p>
+            {[0, 1].map(i => (
+              <div key={i} aria-hidden="true" className="rounded-xl bg-white border border-brown/10 p-5 space-y-3 motion-safe:animate-pulse">
+                <div className="h-4 w-40 max-w-full rounded bg-brown/10" />
+                <div className="h-3 w-64 max-w-full rounded bg-brown/10" />
+                <div className="h-3 w-24 rounded bg-brown/10" />
+              </div>
+            ))}
           </section>
         )}
 
         {/* Upcoming */}
-        {authReady && user && !user.isAnonymous && !loading && (
+        {authReady && user && !user.isAnonymous && !loading && displayReadyUid === user.uid && (
           <>
             <section className="rounded-xl bg-white border border-brown/10">
               <div className="px-4 py-3 border-b border-brown/10">
