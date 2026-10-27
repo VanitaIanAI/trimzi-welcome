@@ -324,6 +324,59 @@ try {
   console.warn('ClickSend SMS failed:', e);
 }
 
+// Customer confirmation is independent of the owner alert and never fails a booking.
+try {
+  if (process.env.CLICKSEND_USERNAME && process.env.CLICKSEND_API_KEY && process.env.SMS_SENDER) {
+    const appointment = new Date(startISO);
+    const dateLabel = appointment.toLocaleDateString('en-GB', {
+      timeZone: 'Europe/London', weekday: 'short', day: 'numeric', month: 'short',
+    });
+    const timeLabel = appointment.toLocaleTimeString('en-GB', {
+      timeZone: 'Europe/London', hour: 'numeric', minute: '2-digit', hour12: true,
+    }).replace(/\s/g, '').toLowerCase();
+    const oneLine = (value: string) => value.replace(/\s+/g, ' ').trim();
+    const customerText = `Hi ${oneLine(customerName)}, your TrimZi booking is confirmed: ${oneLine(summary || 'Appointment')}, ${dateLabel} at ${timeLabel}. Kelvinhair, 116 Queen Margaret Drive. See you then!`;
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 8000);
+    try {
+      const smsResponse = await fetch('https://rest.clicksend.com/v3/sms/send', {
+        method: 'POST',
+        signal: controller.signal,
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Basic ${Buffer.from(`${process.env.CLICKSEND_USERNAME}:${process.env.CLICKSEND_API_KEY}`).toString('base64')}`,
+        },
+        body: JSON.stringify({ messages: [{
+          source: 'trimzi-app', body: customerText, to: customerPhone, from: process.env.SMS_SENDER,
+        }] }),
+      });
+      if (!smsResponse.ok) {
+        console.warn('[Customer SMS] Request rejected:', { httpStatus: smsResponse.status });
+      } else {
+        const result = await smsResponse.json();
+        const message = result?.data?.messages?.[0];
+        if (result?.response_code === 'SUCCESS' && message?.status === 'SUCCESS') {
+          console.log('[Customer SMS] Accepted for sending:', {
+            messageId: typeof message.message_id === 'string' ? message.message_id.slice(0, 80) : null,
+            segments: Number.isFinite(Number(message.message_parts)) ? Number(message.message_parts) : null,
+          });
+        } else {
+          console.warn('[Customer SMS] Provider did not confirm acceptance. No automatic retry.');
+        }
+      }
+    } catch {
+      // A network error/timeout may occur after provider acceptance: do not retry.
+      console.warn('[Customer SMS] Send outcome unknown. No automatic retry.');
+    } finally {
+      clearTimeout(timeout);
+    }
+  } else {
+    console.warn('[Customer SMS] Skipped: SMS configuration is incomplete.');
+  }
+} catch {
+  console.warn('[Customer SMS] Could not prepare confirmation. Booking remains confirmed.');
+}
+
     return NextResponse.json({ ok: true, eventId: eventId, htmlLink: res.data.htmlLink });
   } catch (err: any) {
     console.error(err);
