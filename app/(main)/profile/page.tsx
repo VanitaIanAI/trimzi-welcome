@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useMemo } from 'react';
+import { useEffect, useState, useMemo, useRef } from 'react';
 import { onAuthStateChanged, type User } from 'firebase/auth';
 import { auth, db } from '../../../lib/firebaseClient';
 import {
@@ -44,8 +44,13 @@ export default function ProfilePage() {
   const [authReady, setAuthReady] = useState(false);
   const [user, setUser] = useState<User | null>(null);
 
-  // render only after fields are set at least once
+  // Only show fields loaded successfully for the current account.
   const [profileReady, setProfileReady] = useState(false);
+  const [loadedProfileUid, setLoadedProfileUid] = useState<string | null>(null);
+  const [profileLoadError, setProfileLoadError] = useState<string | null>(null);
+  const [profileRetry, setProfileRetry] = useState(0);
+  const profileLoadVersion = useRef(0);
+  const authIdentity = useRef<string | null | undefined>(undefined);
   // prevent first-paint flicker until client mounts
   const [mounted, setMounted] = useState(false);
   useEffect(() => { setMounted(true); }, []);
@@ -70,15 +75,39 @@ export default function ProfilePage() {
   // auth
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, (u) => {
+      const identity = u ? `${u.uid}:${u.isAnonymous ? 'guest' : 'member'}` : null;
+      if (authIdentity.current !== identity) {
+        authIdentity.current = identity;
+        profileLoadVersion.current += 1;
+        setProfileReady(false);
+        setLoadedProfileUid(null);
+        setProfileLoadError(null);
+        setLoading(true);
+        setError(null);
+        setSaved(false);
+        setName('');
+        setEmailRO('');
+        setPhone('');
+        setRemindersEmail(true);
+        setMarketing(false);
+      }
       setUser(u ?? null);
       setAuthReady(true);
     });
     return unsub;
   }, []);
 
-  // load profile
+  // Ignore stale reads after retrying, signing out or switching accounts.
   useEffect(() => {
+    if (!authReady) return;
     let cancelled = false;
+    const version = ++profileLoadVersion.current;
+    const isCurrent = () => !cancelled && profileLoadVersion.current === version &&
+      !!user && auth.currentUser?.uid === user.uid && !auth.currentUser.isAnonymous;
+    setProfileReady(false);
+    setLoadedProfileUid(null);
+    setProfileLoadError(null);
+    setLoading(true);
 
     async function load() {
       if (!user || user.isAnonymous) {
@@ -87,28 +116,25 @@ export default function ProfilePage() {
       }
       try {
         const snap = await getDoc(doc(db, 'profiles', user.uid));
+        if (!isCurrent()) return;
         const data = (snap.exists() ? (snap.data() as Profile) : {}) as Profile;
-
         setName(data.name ?? (user.displayName ?? ''));
         setEmailRO(data.email ?? (user.email ?? ''));
         setPhone(data.phone ?? '');
         setRemindersEmail(data.notif?.remindersEmail ?? true);
         setMarketing(data.notif?.marketing ?? false);
+        setLoadedProfileUid(user.uid);
+        setProfileReady(true);
       } catch {
-        // swallow; form stays mostly blank apart from auth values
+        if (isCurrent()) setProfileLoadError('We couldn’t load your profile. Please try again.');
       } finally {
-        if (!cancelled) {
-          setProfileReady(true);   // ✅ fields are ready to show (even if from auth defaults)
-          setLoading(false);
-        }
+        if (isCurrent()) setLoading(false);
       }
     }
 
-    load();
-    return () => {
-      cancelled = true;
-    };
-  }, [user]);
+    void load();
+    return () => { cancelled = true; };
+  }, [authReady, user, profileRetry]);
 
   // load active announcements (optional; safe if none exist)
   useEffect(() => {
@@ -141,9 +167,16 @@ export default function ProfilePage() {
 
   const phoneMissing = authReady && user && !user.isAnonymous && (phone.trim() === '');
 
+  const canEditProfile = profileReady && !loading && !profileLoadError &&
+    !!user && !user.isAnonymous && loadedProfileUid === user.uid &&
+    auth.currentUser?.uid === user.uid && !auth.currentUser.isAnonymous;
+
   async function handleSave(e: React.FormEvent) {
     e.preventDefault();
-    if (!user || user.isAnonymous) return;
+    if (!user || user.isAnonymous || !canEditProfile || saving ||
+        auth.currentUser?.uid !== user.uid || auth.currentUser.isAnonymous) return;
+    const saveVersion = profileLoadVersion.current;
+    const isCurrentSave = () => profileLoadVersion.current === saveVersion && auth.currentUser?.uid === user.uid;
 
     setError(null);
     setSaved(false);
@@ -171,9 +204,9 @@ export default function ProfilePage() {
         } as Profile,
         { merge: true }
       );
-      setSaved(true);
+      if (isCurrentSave()) setSaved(true);
     } catch (e) {
-      setError('Failed to save changes. Please try again.');
+      if (isCurrentSave()) setError('Failed to save changes. Please try again.');
     } finally {
       setSaving(false);
     }
@@ -199,10 +232,32 @@ export default function ProfilePage() {
     );
   }
 
-    // Don’t render anything until the client is mounted, auth is known, and fields are populated at least once.
-  if (!mounted || !authReady || !profileReady) {
-    return null;
+  if (!mounted || !authReady) return null;
+
+  if (profileLoadError) {
+    return (
+      <main className="mx-auto max-w-[720px] px-4 py-6 space-y-4">
+        <h1 className="text-2xl font-semibold text-brown">Profile</h1>
+        <section className="rounded-xl border border-brown/10 bg-white p-4">
+          <p role="alert" className="text-brown/80">{profileLoadError}</p>
+          <button
+            type="button"
+            className="mt-4 h-11 rounded-xl px-4 bg-brown text-white font-semibold hover:bg-brown/90"
+            onClick={() => {
+              setProfileLoadError(null);
+              setLoading(true);
+              setProfileRetry(value => value + 1);
+            }}
+          >
+            Try again
+          </button>
+        </section>
+      </main>
+    );
   }
+
+  // Loading presentation is a separate change; keep the form hidden until safe.
+  if (!canEditProfile) return null;
 
   return (
     <main className="mx-auto max-w-[720px] px-4 py-6 space-y-6">
