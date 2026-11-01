@@ -9,6 +9,15 @@ import { assertEnv } from '@lib/assertEnv';
 import { adminDb } from '@lib/firebaseAdmin';
 import { verifyCancelToken } from '@lib/token';
 
+// Prefer HTTP statuses; a network error code is not an HTTP response.
+function calendarHttpStatus(err: any): number | undefined {
+  for (const value of [err?.response?.status, err?.status, err?.code]) {
+    if (typeof value === 'number' && Number.isInteger(value) && value >= 100 && value <= 599) return value;
+    if (typeof value === 'string' && /^[1-5]\d{2}$/.test(value)) return Number(value);
+  }
+  return undefined;
+}
+
 export async function POST(req: Request) {
   try {
     const { token } = await req.json();
@@ -31,6 +40,8 @@ export async function POST(req: Request) {
     let smsStartISO: string | null = null;
     let smsCustomerName: string | null = null;
     let autoRefundEligible: boolean | null = null;
+    let eventWasActive = false;
+    let cancelledNow = false;
 
     try {
       const getRes = await calendar.events.get({
@@ -38,6 +49,7 @@ export async function POST(req: Request) {
         eventId,
       });
       const ev = getRes.data || {};
+      eventWasActive = ev.status !== 'cancelled';
 
       // Service summary (we set this when creating the event)
       smsSummary = typeof ev.summary === 'string' ? ev.summary : null;
@@ -77,22 +89,20 @@ export async function POST(req: Request) {
       } else {
         autoRefundEligible = null;
       }
-    } catch {
-      // ignore — proceed with deletion
+    } catch (err: any) {
+      const status = calendarHttpStatus(err);
+      if (status !== 404 && status !== 410) throw err;
     }
 
-
-
-    // 1) Remove the Google Calendar event (ignore 404/410)
-    try {
-      await calendar.events.delete({
-        calendarId: CALENDAR_ID,
-        eventId,
-      });
-    } catch (err: any) {
-      const code = err?.code || err?.response?.status;
-      if (code !== 404 && code !== 410) {
-        throw err;
+    // Google GET can return a deleted event with status "cancelled".
+    // Keep cleanup on repeat requests, but notify only for a new deletion.
+    if (eventWasActive) {
+      try {
+        await calendar.events.delete({ calendarId: CALENDAR_ID, eventId });
+        cancelledNow = true;
+      } catch (err: any) {
+        const status = calendarHttpStatus(err);
+        if (status !== 404 && status !== 410) throw err;
       }
     }
 
@@ -117,6 +127,7 @@ export async function POST(req: Request) {
 // --- ClickSend SMS alert (owner notification on cancellation) ---
 try {
   if (
+    cancelledNow &&
     process.env.CLICKSEND_USERNAME &&
     process.env.CLICKSEND_API_KEY &&
     process.env.ALERT_SMS_TO &&
