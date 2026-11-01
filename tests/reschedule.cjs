@@ -1,0 +1,115 @@
+// Standalone regression checks. Run: node tests/reschedule.cjs
+// All Firebase, Calendar, Resend and ClickSend calls are mocked. No environment file is loaded.
+const fs=require('fs'),path=require('path'),vm=require('vm'),assert=require('assert/strict');
+const root=path.resolve(__dirname,'..');
+const ts=require(path.join(root,'node_modules/typescript'));
+const fallback=root;
+let passed=0;
+function harness(options={}) {
+ const state={now:Date.parse('2026-11-04T09:00:00Z'),events:new Map(),docs:new Map(),patches:[],inserts:[],deletes:[],sends:[],logs:[],options};
+ const event={id:'event1',etag:'"v1"',status:'confirmed',summary:'Haircut — Customer',description:'Payment paid; keep this',
+  start:{dateTime:'2026-11-11T10:00:00Z'},end:{dateTime:'2026-11-11T10:45:00Z'},extendedProperties:{private:{bookingOwnerUid:'user1',confirmationEmail:'booking@example.test',bookingBarber:'Ian',bookingService:'Haircut',customerName:'Customer',paymentStatus:'paid',squarePaymentId:'payment1'}}};
+ state.events.set('event1',event);
+ state.docs.set('users/user1/bookings/doc1',{eventId:'event1',startISO:event.start.dateTime,endISO:'2026-11-11T10:30:00Z',price:22,paymentStatus:'paid',squarePaymentId:'payment1'});
+ const copy=x=>structuredClone(x);
+ class Ref {
+  constructor(p){this.path=p;this.id=p.split('/').pop();}
+  collection(p){return new Query(this.path+'/'+p);}
+  async get(){if(state.options.readError)throw Error('mock read');const data=state.docs.get(this.path);return{exists:data!==undefined,id:this.id,ref:this,data:()=>data===undefined?undefined:copy(data)};}
+  async set(data,opts){state.docs.set(this.path,opts?.merge?{...state.docs.get(this.path),...copy(data)}:copy(data));}
+  async update(data){if(!state.docs.has(this.path))throw Error('missing mock doc');await this.set(data,{merge:true});}
+  async delete(){state.docs.delete(this.path);}
+ }
+ class Query {
+  constructor(p,filters=[]){this.path=p;this.filters=filters;}
+  doc(id){return new Ref(this.path+'/'+id);}
+  where(k,op,v){return new Query(this.path,[...this.filters,[k,op,v]]);}
+  async get(){const docs=[];for(const [p,d] of state.docs){const match=this.path==='**bookings'?p.includes('/bookings/'):p.startsWith(this.path+'/')&&p.slice(this.path.length+1).indexOf('/')<0;
+   if(match&&this.filters.every(([k,op,v])=>op==='=='&&d[k]===v))docs.push({id:p.split('/').pop(),ref:new Ref(p),data:()=>copy(d)});}
+   return{docs,empty:!docs.length};}
+ }
+ let transactionQueue=Promise.resolve();
+ const db={collection:p=>new Query(p),collectionGroup:p=>new Query('**'+p),doc:p=>new Ref(p),batch:()=>{const refs=[];return{delete:r=>refs.push(r),commit:async()=>{for(const r of refs)await r.delete();}};},
+  runTransaction:fn=>{
+   const execute=async()=>{const writes=[];const tx={get:r=>r.get(),set:(r,d,o)=>writes.push(()=>r.set(d,o)),update:(r,d)=>writes.push(()=>r.update(d)),create:(r,d)=>writes.push(()=>{if(state.docs.has(r.path))throw Error('already exists');return r.set(d);})};
+    const result=await fn(tx);
+    for(const w of writes)await w();return result;
+   };
+   const result=transactionQueue.then(execute);transactionQueue=result.catch(()=>{});return result;
+  }};
+ // Intercept the schedule-finalization transaction before any of its writes commit.
+ const realTx=db.runTransaction;
+ db.runTransaction=fn=>realTx(async tx=>{
+  const originalUpdate=tx.update;
+  tx.update=(r,d)=>{if(state.options.finishWriteError&&r.path==='users/user1/bookings/doc1'&&d.rescheduledAt){state.options.finishWriteError=false;throw Error('mock Firestore finalization failure');}originalUpdate(r,d);};
+  return fn(tx);
+ });
+ const calendar={events:{
+  get:async({eventId})=>{if(state.options.getError)throw state.options.getError;const e=state.events.get(eventId);if(!e)throw{response:{status:404}};return{data:copy(e)};},
+  list:async args=>{assert.equal(args.singleEvents,true);assert.equal(args.showDeleted,false);if(options.listError)throw Error('mock list');state.options.listHook?.(state);const pages=state.options.pages;
+   if(pages){const i=args.pageToken?Number(args.pageToken):0;return{data:{items:copy(pages[i]),nextPageToken:i+1<pages.length?String(i+1):undefined}};}
+   return{data:{items:[...state.events.values()].filter(e=>e.start?.date||Date.parse(e.start?.dateTime)<Date.parse(args.timeMax)&&Date.parse(e.end?.dateTime)>Date.parse(args.timeMin)).map(copy)}};},
+  patch:async(args,config)=>{state.patches.push(copy(args));assert.equal(config.retry,false);assert.equal(config.timeout,15000);const e=state.events.get(args.eventId);assert.equal(config.headers['If-Match'],e.etag);
+   if(state.options.patchWait)await state.options.patchWait;
+   if(state.options.patchError&&!state.options.commitThenError)throw state.options.patchError;
+   state.events.set(args.eventId,{...e,...copy(args.requestBody),etag:'"v2"'});
+   if(state.options.commitThenError)throw Error('mock uncertain network result');return{data:copy(state.events.get(args.eventId))};},
+  insert:async args=>{state.inserts.push(copy(args));const e={...copy(args.requestBody),id:'new-event',htmlLink:'https://calendar.example.test/event'};state.events.set('new-event',e);return{data:e};},
+  delete:async({eventId})=>{state.deletes.push(eventId);state.events.set(eventId,{...state.events.get(eventId),status:'cancelled'});return{};},
+ },freebusy:{query:async()=>({data:{calendars:{'mock-calendar':{busy:options.freebusy||[]}}}})}};
+ const env={GOOGLE_CALENDAR_ID:'mock-calendar',RESEND_API_KEY:'mock-resend',RESEND_FROM:'bookings@example.test',CANCEL_TOKEN_SECRET:'mock-secret',CLICKSEND_USERNAME:'mock-user',CLICKSEND_API_KEY:'mock-key',ALERT_SMS_TO:'mock-owner',SMS_SENDER:'mock-sender',...options.env};
+ const adminAuth={verifyIdToken:async token=>{if(token==='bad')throw Error('invalid token');return{uid:token==='other'?'user2':'user1',firebase:{sign_in_provider:token==='anonymous'?'anonymous':'password'}};}};
+ class FakeDate extends Date {constructor(...args){super(...(args.length?args:[state.now]));}static now(){return state.now;}}
+ const cache={};
+ const stubs={'next/server':{NextResponse:{json:(d,o)=>Response.json(d,o),redirect:url=>Response.redirect(url)}},'@lib/firebaseAdmin':{adminDb:db,adminAuth},'@lib/googleCalendar':{getCalendar:async()=>calendar,CALENDAR_ID:'mock-calendar',TZ:'Europe/London'},'@lib/assertEnv':{assertEnv:()=>{}},resend:{Resend:class{constructor(){}async emailsSend(){}emails={send:async d=>{state.sends.push({kind:'original-email',body:d});return{data:{id:'email1'}};}};}}};
+ function load(p){if(cache[p])return cache[p];let file=path.join(root,p);if(!fs.existsSync(file))file=path.join(fallback,p);const source=fs.readFileSync(file,'utf8');const code=ts.transpileModule(source,{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2020,esModuleInterop:true,jsx:ts.JsxEmit.ReactJSX}}).outputText;
+  const exports={};cache[p]=exports;
+  const requireMock=n=>{if(n in stubs)return stubs[n];if(n==='crypto')return require('crypto');if(n.startsWith('@lib/'))return load('lib/'+n.slice(5)+'.ts');throw Error('UNEXPECTED REAL IMPORT '+n);};
+  vm.runInNewContext(code,{exports,require:requireMock,Date:FakeDate,Intl,Buffer,Response,Request,URL,AbortController,AbortSignal,setInterval,clearInterval,setTimeout,clearTimeout,process:{env},console:{log:(...x)=>state.logs.push(x),warn:(...x)=>state.logs.push(x),error:(...x)=>state.logs.push(x)},fetch:async(url,init)=>{
+   assert(['https://api.resend.com/emails','https://rest.clicksend.com/v3/sms/send'].includes(url),'UNEXPECTED REAL URL '+url);
+   const kind=url.includes('resend')?'email':'sms';state.sends.push({kind,body:JSON.parse(init.body)});
+   if(state.options[kind+'Error'])throw Error('mock '+kind+' failure');
+   if(state.options[kind+'Reject'])return Response.json({response_code:'FAILURE'},{status:422});
+   return Response.json(kind==='email'?{id:'email1'}:{response_code:'SUCCESS',data:{messages:[{message_id:'sms1',status:'SUCCESS',message_parts:1}]}});
+  }},{filename:p});return exports;
+ }
+ const request=(method,body,token='good',query='')=>new Request('https://app.example.test/api/reschedule'+query,{method,headers:token?{authorization:'Bearer '+token,'Content-Type':'application/json'}:{},...(method==='POST'?{body:JSON.stringify(body)}:{})});
+ const data={bookingId:'doc1',date:'2026-11-04',time:'11:00',expectedStartISO:'2026-11-11T10:00:00.000Z',requestId:'12345678-1234-1234-1234-123456789abc'};
+ return{state,load,request,data,db,event,async post(body=data,token='good'){const r=await load('app/api/reschedule/route.ts').POST(request('POST',body,token));return{status:r.status,body:await r.json()};},async get(query='?bookingId=doc1',token='good'){const r=await load('app/api/reschedule/route.ts').GET(request('GET',null,token,query));return{status:r.status,body:await r.json()};}};
+}
+async function test(name,fn){await fn();passed++;console.log('PASS '+name);}
+(async()=>{
+ await test('morning display adds am; noon/afternoon retain24h; UK DST correct',async()=>{const h=harness();const d=h.load('lib/rescheduleDisplay.ts');assert.equal(d.formatRescheduleTime('09:30'),'09:30 am');assert.equal(d.formatRescheduleTime('11:45'),'11:45 am');assert.equal(d.formatRescheduleTime('12:00'),'12:00');assert.equal(d.formatRescheduleTime('17:15'),'17:15');assert(d.formatRescheduleDateTime('2026-12-09T09:30:00Z').endsWith('09:30 am'));assert(d.formatRescheduleDateTime('2027-07-07T08:30:00Z').endsWith('09:30 am'));assert(d.formatRescheduleDateTime('2026-12-09T13:15:00Z').endsWith('13:15'));});
+ await test('UK day windows handle clock-change midnight offsets',async()=>{const h=harness();const p=h.load('lib/reschedulePolicy.ts');assert.equal(p.ukMidnight('2027-03-28'),'2027-03-28T00:00:00.000Z');assert.equal(p.ukMidnight('2027-03-29'),'2027-03-28T23:00:00.000Z');assert.equal(p.ukMidnight('2027-10-31'),'2027-10-30T23:00:00.000Z');assert.equal(p.ukMidnight('2027-11-01'),'2027-11-01T00:00:00.000Z');});
+ await test('lost coordination ownership stops before Calendar mutation',async()=>{const h=harness({listHook:s=>s.docs.set('calendarCoordination/primary',{owner:'another-request',expiresAtMs:s.now+120000})});assert.equal((await h.post()).status,503);assert.equal(h.state.patches.length,0);assert.equal(h.state.sends.length,0);});
+ await test('expired lease stops a stalled request before mutation',async()=>{const h=harness({listHook:s=>s.now+=121000});assert.equal((await h.post()).status,503);assert.equal(h.state.patches.length,0);});
+ for(const token of [null,'bad','anonymous','other'])await test('reject identity '+token,async()=>{const h=harness();const r=await h.post(h.data,token);assert([401,404].includes(r.status));assert.equal(h.state.patches.length,0);assert.equal(h.state.sends.length,0);});
+ await test('editable reference cannot steal event ownership',async()=>{const h=harness();h.event.extendedProperties.private.bookingOwnerUid='another-user';const r=await h.post();assert.equal(r.status,403);assert.equal(h.state.patches.length,0);});
+ await test('legacy contact path without Calendar metadata exposure',async()=>{const h=harness();delete h.event.extendedProperties.private.bookingOwnerUid;const r=await h.get();assert.deepEqual(r.body,{ok:true,eligible:false,reason:'older'});assert.equal((await h.post()).status,409);});
+ for(const delta of [24*3600000,24*3600000-1,3600000])await test('notice cutoff '+delta,async()=>{const h=harness();h.event.start.dateTime=new Date(h.state.now+delta).toISOString();h.event.end.dateTime=new Date(h.state.now+delta+2700000).toISOString();assert.equal((await h.get()).body.reason,'notice');assert.equal((await h.post()).status,409);assert.equal(h.state.patches.length,0);});
+ await test('same-day move retains IDs, payment, metadata and exact45m',async()=>{const h=harness();const r=await h.post();assert.equal(r.status,200);assert.equal(r.body.startISO,'2026-11-04T11:00:00.000Z');assert.deepEqual(Object.keys(h.state.patches[0].requestBody).sort(),['end','start']);const e=h.state.events.get('event1');assert.equal(e.end.dateTime,'2026-11-04T11:45:00.000Z');assert.equal(e.description,'Payment paid; keep this');assert.equal(e.extendedProperties.private.squarePaymentId,'payment1');const b=h.state.docs.get('users/user1/bookings/doc1');assert.equal(b.paymentStatus,'paid');assert.equal(b.price,22);assert.equal(b.eventId,'event1');assert.equal(b.endISO,'2026-11-04T11:45:00.000Z');assert.equal(h.state.inserts.length,0);assert.equal(h.state.deletes.length,0);assert.equal(h.state.sends.length,2);assert.equal(h.state.sends.find(s=>s.kind==='email').body.to,'booking@example.test');assert.equal(h.state.sends.find(s=>s.kind==='sms').body.messages[0].to,'mock-owner');assert(h.state.sends.find(s=>s.kind==='sms').body.messages[0].body.includes('From:'));assert(h.state.sends.find(s=>s.kind==='email').body.subject.includes('has changed'));});
+ await test('repeated request does not move/send twice',async()=>{const h=harness();await h.post();assert.equal((await h.post()).status,200);assert.equal(h.state.patches.length,1);assert.equal(h.state.sends.length,2);assert.equal((await h.post({...h.data,time:'12:00'})).status,409);});
+ await test('conflicting event blocks move',async()=>{const h=harness();h.state.events.set('other',{id:'other',start:{dateTime:'2026-11-04T11:30:00Z'},end:{dateTime:'2026-11-04T12:15:00Z'}});assert.equal((await h.post()).status,409);assert.equal(h.state.patches.length,0);assert.equal(h.state.docs.get('users/user1/bookings/doc1').startISO,h.event.start.dateTime);});
+ await test('own event excluded but overlapping other event retained',async()=>{const h=harness();h.event.start.dateTime='2026-11-11T10:00:00Z';h.state.events.set('other',{id:'other',start:{dateTime:'2026-11-11T10:15:00Z'},end:{dateTime:'2026-11-11T11:00:00Z'}});const r=await h.get('?bookingId=doc1&date=2026-11-11');assert(!r.body.available.includes('10:00'));assert(r.body.available.includes('11:00'));});
+ await test('active holds block destination',async()=>{const h=harness();h.state.docs.set('holds/hold',{date:'2026-11-04',barber:'Ian',startISO:'2026-11-04T11:00:00Z',endISO:'2026-11-04T11:45:00Z',expiresAt:h.state.now+60000});assert.equal((await h.post()).status,409);});
+ await test('expired hold ignored',async()=>{const h=harness();h.state.docs.set('holds/hold',{date:'2026-11-04',barber:'Ian',startISO:'2026-11-04T11:00:00Z',endISO:'2026-11-04T11:45:00Z',expiresAt:h.state.now-1});assert.equal((await h.post()).status,200);});
+ await test('all-day, transparent, cancelled and pagination handling',async()=>{const h=harness({pages:[[{id:'transparent',transparency:'transparent',start:{dateTime:'2026-11-04T11:00:00Z'},end:{dateTime:'2026-11-04T12:00:00Z'}}],[{id:'cancelled',status:'cancelled'},{id:'all-day',start:{date:'2026-11-04'},end:{date:'2026-11-05'}}]]});const r=await h.get('?bookingId=doc1&date=2026-11-04');assert.equal(r.body.available.length,0);});
+ for(const [date,time] of [['2026-11-08','11:00'],['2026-11-04','09:15'],['2026-11-04','11:10'],['2026-02-30','11:00'],['2026-11-04','08:00']])await test('reject invalid target '+date+' '+time,async()=>{const h=harness();assert.equal((await h.post({...h.data,date,time})).status,400);assert.equal(h.state.patches.length,0);});
+ await test('Christmas last start retains45m',async()=>{const h=harness();const r=await h.post({...h.data,date:'2026-12-21',time:'17:15'});assert.equal(r.status,200);assert.equal(h.state.events.get('event1').end.dateTime,'2026-12-21T18:00:00.000Z');});
+ await test('invalid original service duration is not used',async()=>{const h=harness();h.event.end.dateTime='2026-11-11T10:30:00Z';assert.equal((await h.get()).body.reason,'contact');assert.equal((await h.post()).status,409);});
+ await test('stale expected start cannot overwrite another move',async()=>{const h=harness();assert.equal((await h.post({...h.data,expectedStartISO:'2026-11-11T11:00:00.000Z'})).status,409);assert.equal(h.state.patches.length,0);});
+ await test('definite Calendar rejection leaves original unchanged',async()=>{const h=harness({patchError:{response:{status:412}}});assert.equal((await h.post()).status,409);assert.equal(h.state.events.get('event1').start.dateTime,h.event.start.dateTime);assert.equal(h.state.sends.length,0);});
+ await test('uncertain applied move recovers without another Calendar patch',async()=>{const h=harness({commitThenError:true});assert.equal((await h.post()).status,503);assert.equal(h.state.sends.length,0);h.state.now+=31000;const r=await h.post();assert.equal(r.status,200);assert.equal(h.state.patches.length,1);assert.equal(h.state.sends.length,2);assert.equal(h.state.docs.get('users/user1/bookings/doc1').startISO,'2026-11-04T11:00:00.000Z');});
+ await test('uncertain unapplied move resolves failed with original intact',async()=>{const h=harness({patchError:Error('network')});assert.equal((await h.post()).status,503);h.state.now+=31000;assert.equal((await h.post()).status,409);assert.equal(h.state.events.get('event1').start.dateTime,h.event.start.dateTime);assert.equal(h.state.sends.length,0);});
+ await test('Firestore failure after Calendar patch reconciles on retry',async()=>{const h=harness({finishWriteError:true});assert.equal((await h.post()).status,503);assert.equal(h.state.events.get('event1').start.dateTime,'2026-11-04T11:00:00.000Z');assert.equal(h.state.docs.get('users/user1/bookings/doc1').startISO,h.event.start.dateTime);h.state.now+=31000;assert.equal((await h.post()).status,200);assert.equal(h.state.patches.length,1);});
+ await test('simultaneous changes do not both mutate',async()=>{let release;const wait=new Promise(r=>release=r);const h=harness({patchWait:wait});const one=h.post();while(!h.state.patches.length)await new Promise(r=>setTimeout(r,0));const two=await h.post({...h.data,requestId:'22345678-1234-1234-1234-123456789abc',time:'12:00'});assert.equal(two.status,409);release();assert.equal((await one).status,200);assert.equal(h.state.patches.length,1);});
+ await test('cancellation waits out a move rather than racing its Calendar patch',async()=>{let release;const h=harness({patchWait:new Promise(r=>release=r)});const moving=h.post();while(!h.state.patches.length)await new Promise(r=>setTimeout(r,0));const cancel=h.load('app/api/cancel/route.ts');const denied=await cancel.POST(h.request('POST',{eventId:'event1'}));assert.equal(denied.status,409);assert.equal(h.state.deletes.length,0);release();await moving;const done=await cancel.POST(h.request('POST',{eventId:'event1'}));assert.equal(done.status,200);assert.equal(h.state.deletes.length,1);});
+ await test('cancelled new booking cannot be rescheduled',async()=>{const h=harness();h.event.status='cancelled';assert.equal((await h.post()).status,409);assert.equal(h.state.patches.length,0);});
+ await test('another new booking cannot race a reschedule destination',async()=>{let release;const h=harness({patchWait:new Promise(r=>release=r)});const moving=h.post();while(!h.state.patches.length)await new Promise(r=>setTimeout(r,0));const create=h.load('app/api/bookings/route.ts');const r=await create.POST(h.request('POST',{summary:'Haircut',date:'2026-11-04',startISO:'2026-11-04T11:00:00Z',customerName:'Test',customerPhone:'07900123456',attendeeEmail:'booking@example.test'}));assert.equal(r.status,409);assert.equal(h.state.inserts.length,0);release();await moving;});
+ await test('destination hold creation shares diary coordination',async()=>{let release;const h=harness({patchWait:new Promise(r=>release=r)});const moving=h.post();while(!h.state.patches.length)await new Promise(r=>setTimeout(r,0));const holds=h.load('app/api/holds/route.ts');const r=await holds.POST(h.request('POST',{date:'2026-11-04',time:'11:00',barber:'Ian'}));assert.equal(r.status,409);release();await moving;});
+ await test('payment update racing Calendar move preserves both sets of fields',async()=>{let release;const h=harness({patchWait:new Promise(r=>release=r)});const moving=h.post();while(!h.state.patches.length)await new Promise(r=>setTimeout(r,0));h.state.docs.set('users/user1/bookings/doc1',{...h.state.docs.get('users/user1/bookings/doc1'),paymentStatus:'paid',squarePaymentId:'new-payment'});h.state.events.get('event1').extendedProperties.private.squarePaymentId='new-payment';release();assert.equal((await moving).status,200);assert.equal(h.state.docs.get('users/user1/bookings/doc1').squarePaymentId,'new-payment');assert.equal(h.state.events.get('event1').extendedProperties.private.squarePaymentId,'new-payment');});
+ for(const kind of ['email','sms'])for(const failure of ['Error','Reject'])await test(kind+failure+' cannot fail a saved move or suppress other notification',async()=>{const h=harness({[kind+failure]:true});const r=await h.post();assert.equal(r.status,200);assert.equal(r.body.notificationsAccepted,false);assert.equal(h.state.sends.length,2);await h.post();assert.equal(h.state.sends.length,2);});
+ await test('new signed-in creation gets server-verified ownership and original confirmations',async()=>{const h=harness();const route=h.load('app/api/bookings/route.ts');const body={summary:'Haircut',date:'2026-12-23',startISO:'2026-12-23T11:00:00Z',customerName:'Test',customerPhone:'07900123456',attendeeEmail:'booking@example.test',paymentMethod:'pay_later'};const r=await route.POST(h.request('POST',body));assert.equal(r.status,200);const e=h.state.events.get('new-event');assert.equal(e.extendedProperties.private.bookingOwnerUid,'user1');assert.equal(e.extendedProperties.private.confirmationEmail,'booking@example.test');assert.equal(e.end.dateTime,'2026-12-23T11:45:00.000Z');assert.equal(h.state.sends.filter(x=>x.kind==='original-email').length,1);assert.equal(h.state.sends.filter(x=>x.kind==='sms').length,2);});
+ await test('guest creation unchanged, no ownership granted',async()=>{const h=harness();const route=h.load('app/api/bookings/route.ts');const body={summary:'Haircut',date:'2026-12-23',startISO:'2026-12-23T11:00:00Z',customerName:'Test',customerPhone:'07900123456',attendeeEmail:'booking@example.test'};const r=await route.POST(h.request('POST',body,null));assert.equal(r.status,200);assert.equal(h.state.events.get('new-event').extendedProperties.private.bookingOwnerUid,undefined);});
+ console.log(`PASS ${passed} isolated integration scenarios; ALL Firebase, Calendar, email and SMS services mocked.`);
+})().catch(e=>{console.error(e);process.exitCode=1;});

@@ -1,6 +1,7 @@
 // lib/firebaseAdmin.ts
 import { getApps, initializeApp, cert, AppOptions } from 'firebase-admin/app';
 import { getFirestore } from 'firebase-admin/firestore';
+import { getAuth } from 'firebase-admin/auth';
 
 // Reuse your existing GOOGLE_* envs from .env.local
 const projectId  = process.env.GOOGLE_PROJECT_ID;
@@ -17,3 +18,4 @@ const opts: AppOptions = {
 
 const app = getApps().length ? getApps()[0]! : initializeApp(opts);
 export const adminDb = getFirestore(app);
+export const adminAuth = getAuth(app);

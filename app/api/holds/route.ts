@@ -1,3 +1,4 @@
+import { withCalendarMutation } from '@lib/calendarMutation';
 import { NextResponse } from 'next/server';
 import { adminDb } from '@lib/firebaseAdmin';
 import { addMinutes, fetchBusyIntervals, overlaps, toDateAt } from '@lib/availability';
@@ -6,7 +7,7 @@ import { build15MinGrid, isChristmasOpeningDate, isChristmasStartAllowed } from 
 export const dynamic = 'force-dynamic';
 
 // Create a 2-minute hold for [start, start+45m)
-export async function POST(req: Request) {
+async function createHold(req: Request, assertOwnership: () => Promise<void>) {
   const { date, time, barber = 'Ian' } = await req.json();
   if (!date || !time) return NextResponse.json({ error: 'date and time required' }, { status: 400 });
 
@@ -39,6 +40,7 @@ export async function POST(req: Request) {
   }
 
   const holdId = `${barber}|${date}|${time}`;
+  await assertOwnership();
   await adminDb.collection('holds').doc(holdId).set({
     holdId, barber, date, time,
     startISO: start.toISOString(),
@@ -57,4 +59,7 @@ export async function DELETE(req: Request) {
   if (!holdId) return NextResponse.json({ error: 'holdId required' }, { status: 400 });
   await adminDb.collection('holds').doc(holdId).delete();
   return NextResponse.json({ ok: true });
+}
+export async function POST(req: Request) {
+  return withCalendarMutation(assertOwnership => createHold(req, assertOwnership));
 }

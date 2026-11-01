@@ -649,9 +649,11 @@ customerPhone = validation.contact.phone;
 
     // POST to your API route
     // Call your existing booking API first
+    const bookingUser = auth.currentUser;
+    const bookingToken = bookingUser && !bookingUser.isAnonymous ? await bookingUser.getIdToken() : null;
     const res = await fetch('/api/bookings', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...(bookingToken ? {Authorization: `Bearer ${bookingToken}`} : {}) },
       body: JSON.stringify({
         summary: serviceName ?? 'Trimzi Booking',
         description: `Booked via Trimzi — Barber: ${barber || 'Ian'}`,

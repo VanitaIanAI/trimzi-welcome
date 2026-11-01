@@ -1,3 +1,4 @@
+import { calendarMutation } from '@lib/calendarMutation';
 // app/api/cancel/route.ts
 import { NextResponse } from 'next/server';
 import { getCalendar, CALENDAR_ID } from '@lib/googleCalendar';
@@ -33,6 +34,7 @@ export async function POST(req: Request) {
     let eventWasActive = false;
     let cancelledNow = false;
 
+    await calendarMutation(async assertOwnership => {
     try {
       const getRes = await calendar.events.get({
         calendarId: CALENDAR_ID,
@@ -89,6 +91,7 @@ export async function POST(req: Request) {
     // Keep cleanup on repeat requests, but notify only for a new deletion.
     if (eventWasActive) {
       try {
+        await assertOwnership();
         await calendar.events.delete({ calendarId: CALENDAR_ID, eventId });
         cancelledNow = true;
       } catch (err: any) {
@@ -96,6 +99,8 @@ export async function POST(req: Request) {
         if (status !== 404 && status !== 410) throw err;
       }
     }
+
+    });
 
     // Remove any matching hold if still present
     try {
@@ -167,6 +172,6 @@ try {
     });
   } catch (err: any) {
     console.error('Cancel error:', err);
-    return NextResponse.json({ ok: false, error: err?.message ?? 'Internal error' }, { status: 500 });
+    return NextResponse.json({ ok: false, error: err?.message ?? 'Internal error' }, { status: err?.diaryStatus || 500 });
   }
 }

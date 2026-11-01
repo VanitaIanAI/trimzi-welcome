@@ -2,6 +2,7 @@
 'use client';
 
 import Link from 'next/link';
+import RescheduleAppointment from '../../../components/RescheduleAppointment';
 import { useEffect, useMemo, useState } from 'react';
 import { onAuthStateChanged, type User } from 'firebase/auth';
 import {
@@ -28,6 +29,7 @@ type Booking = {
 };
 
 export default function BookingsPage() {
+  const [changingId, setChangingId] = useState<string | null>(null);
   const [user, setUser] = useState<User | null>(null);
   const [authReady, setAuthReady] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -40,6 +42,7 @@ const [cancellingId, setCancellingId] = useState<string | null>(null);
   // Track auth state
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, (u) => {
+      setChangingId(null);
       setUser(u ?? null);
       setAuthReady(true);
     });
@@ -217,6 +220,8 @@ const [cancellingId, setCancellingId] = useState<string | null>(null);
     Rebook
   </Link>
 
+  <button disabled={cancellingId === b.id} className="text-sm px-3 py-1 rounded-md border border-brown/20 text-brown hover:bg-brown/5 disabled:opacity-50" onClick={() => setChangingId(b.id)}>Change appointment</button>
+
   {/* Cancel button – shows spinner + disables while cancelling */}
   <button
     disabled={cancellingId === b.id}
@@ -331,6 +336,7 @@ const [cancellingId, setCancellingId] = useState<string | null>(null);
           </>
         )}
       </main>
+      {changingId && user && !user.isAnonymous && <RescheduleAppointment key={`${user.uid}:${changingId}`} bookingId={changingId} onClose={() => setChangingId(null)} />}
     </div>
   );
 }

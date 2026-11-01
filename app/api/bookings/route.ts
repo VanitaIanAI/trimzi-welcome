@@ -10,6 +10,8 @@ import { randomUUID } from 'crypto';
 import { Resend } from 'resend';
 import { validateBookingContact } from '@lib/contactDetails';
 import { isChristmasStartAllowed } from '@lib/bookingSchedule';
+import { bookingIdentity } from '@lib/bookingIdentity';
+import { calendarMutation } from '@lib/calendarMutation';
 
 export async function POST(req: Request) {
   try {
@@ -60,6 +62,7 @@ export async function POST(req: Request) {
       return NextResponse.json({ error, message: error }, { status: 400 });
     }
 
+    const bookingOwnerUid = await bookingIdentity(req, false);
     assertEnv('GOOGLE_CALENDAR_ID');
 
   const resend =
@@ -83,6 +86,7 @@ export async function POST(req: Request) {
     const end = addMinutes(start, 45);
     const endISO = end.toISOString();
 
+    const creation = await calendarMutation(async assertOwnership => {
     // 1) Check conflicts now (calendar + active holds), but DO NOT self-conflict on your own hold
 const busy = await fetchBusyIntervals(date);
 
@@ -170,6 +174,7 @@ const event = {
   reminders: { useDefault: true },
    extendedProperties: {
     private: {
+      ...(bookingOwnerUid ? {bookingOwnerUid, confirmationEmail: attendeeEmail, bookingBarber: barber, bookingService: summary} : {}),
       customerName: customerName || '',
       customerPhone: customerPhone || '',
       paymentMethod: normalisedPaymentMethod,
@@ -179,6 +184,7 @@ const event = {
   transparency: 'opaque',
 } as const;
 
+    await assertOwnership();
     const res = await calendar.events.insert({
       calendarId: CALENDAR_ID,
       requestBody: event,
@@ -188,6 +194,11 @@ const event = {
     const eventId = typeof res.data.id === 'string' && res.data.id ? res.data.id : randomUUID();
 
     if (holdId) await adminDb.collection('holds').doc(holdId).delete().catch(() => {});
+
+    return {res, eventId};
+    });
+    if (creation instanceof Response) return creation;
+    const {res, eventId} = creation;
 
     // Send customer confirmation email via Resend
 
@@ -380,6 +391,6 @@ try {
     return NextResponse.json({ ok: true, eventId: eventId, htmlLink: res.data.htmlLink });
   } catch (err: any) {
     console.error(err);
-    return NextResponse.json({ error: err?.message ?? 'Unknown error' }, { status: 500 });
+    return NextResponse.json({ error: err?.message ?? 'Unknown error' }, { status: err?.diaryStatus || 500 });
   }
 }

@@ -1,3 +1,4 @@
+import { calendarMutation } from '@lib/calendarMutation';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -26,6 +27,7 @@ export async function GET(req: Request) {
     let smsCustomerName: string | null = null;
     let autoRefundEligible: boolean | null = null;
 
+    await calendarMutation(async assertOwnership => {
     try {
       const getRes = await calendar.events.get({
         calendarId: CALENDAR_ID,
@@ -77,7 +79,9 @@ export async function GET(req: Request) {
 
 
 
+    await assertOwnership();
     await calendar.events.delete({ calendarId: CALENDAR_ID, eventId: data.eventId }).catch(() => {});
+    });
 
     if (data.uid) {
       await adminDb.collection('users').doc(data.uid)
