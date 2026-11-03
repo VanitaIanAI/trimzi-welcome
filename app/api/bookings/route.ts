@@ -6,7 +6,9 @@ import { adminDb } from '@lib/firebaseAdmin';
 import { addMinutes, fetchBusyIntervals, overlaps } from '@lib/availability';
 
 import { signCancelToken } from '@lib/token';
-import { randomUUID } from 'crypto';
+import { randomUUID, randomBytes } from 'crypto';
+import { findService } from '@lib/serviceCatalog';
+import { paymentHash } from '@lib/squarePayments';
 import { Resend } from 'resend';
 import { validateBookingContact } from '@lib/contactDetails';
 import { isChristmasStartAllowed } from '@lib/bookingSchedule';
@@ -29,7 +31,6 @@ export async function POST(req: Request) {
       noteText,
       // NEW: payment metadata (may be missing for older clients)
       paymentMethod,
-      paymentStatus,
     } = body as {
       summary?: string;
       description?: string;
@@ -48,6 +49,10 @@ export async function POST(req: Request) {
     if (!summary || !startISO || !date) {
       return NextResponse.json({ error: 'summary, date and startISO are required' }, { status: 400 });
     }
+
+    const service = findService(summary);
+    if (!service) return NextResponse.json({error: 'Please select a current service.'}, {status: 400});
+    const paymentToken = randomBytes(32).toString('hex');
 
     const validation = validateBookingContact({
       name: rawCustomerName, phone: rawCustomerPhone, email: rawAttendeeEmail,
@@ -74,12 +79,8 @@ export async function POST(req: Request) {
     const normalisedPaymentMethod: 'pay_now' | 'pay_later' =
       paymentMethod === 'pay_now' ? 'pay_now' : 'pay_later';
 
-    const normalisedPaymentStatus: 'unpaid' | 'paid' | 'partially_paid' | 'refunded' =
-      paymentStatus === 'paid' ||
-      paymentStatus === 'partially_paid' ||
-      paymentStatus === 'refunded'
-        ? paymentStatus
-        : 'unpaid';
+    // Payment status is server-controlled; only verified payment processing may mark it paid.
+    const normalisedPaymentStatus = 'unpaid' as const;
 
     // Always 45 minutes
     const start = new Date(startISO);
@@ -188,6 +189,11 @@ const event = {
       customerPhone: customerPhone || '',
       paymentMethod: normalisedPaymentMethod,
       paymentStatus: normalisedPaymentStatus,
+      paymentValidation: 'v1',
+      expectedAmountMinor: String(service.price * 100),
+      expectedCurrency: 'GBP',
+      paymentServiceName: service.name,
+      paymentTokenHash: paymentHash(paymentToken),
     },
   },
   transparency: 'opaque',
@@ -397,7 +403,7 @@ try {
   console.warn('[Customer SMS] Could not prepare confirmation. Booking remains confirmed.');
 }
 
-    return NextResponse.json({ ok: true, eventId: eventId, htmlLink: res.data.htmlLink });
+    return NextResponse.json({ ok: true, eventId: eventId, paymentToken, htmlLink: res.data.htmlLink });
   } catch (err: any) {
     console.error(err);
     return NextResponse.json({ error: err?.message ?? 'Unknown error' }, { status: err?.diaryStatus || 500 });

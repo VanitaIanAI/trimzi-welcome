@@ -1,4 +1,5 @@
 'use client';
+import { findService } from '@lib/serviceCatalog';
 
 // app/booking/page.tsx
 
@@ -273,7 +274,8 @@ function BookingContent() {
   const octoberMaintenance = useOctoberMaintenance();
   const searchParams = useSearchParams();
   const serviceName = searchParams.get('name');
-  const servicePrice = searchParams.get('price');
+  const selectedService = findService(serviceName);
+  const servicePrice = selectedService ? String(selectedService.price) : null;
   // Prefill barber if coming from "Rebook"
 const barberParam = searchParams.get('barber');
 
@@ -737,6 +739,7 @@ customerPhone = validation.contact.phone;
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
+              paymentToken: json.paymentToken,
               amount: amountMinor,
               currency: 'GBP',
               eventId,

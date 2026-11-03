@@ -1,6 +1,8 @@
 // app/api/webhooks/square/route.ts
 
 import { NextResponse } from 'next/server';
+import { createHmac, timingSafeEqual } from 'node:crypto';
+import { processVerifiedPayment } from '@lib/squarePayments';
 import { adminDb } from '@lib/firebaseAdmin';
 import { getCalendar, CALENDAR_ID } from '@lib/googleCalendar';
 
@@ -14,14 +16,27 @@ function safeGetPayment(payload: any) {
 
 export async function POST(req: Request) {
   try {
-    // We don't do signature verification yet (can be added later with the
-    // Square webhook signature key). For now, just parse JSON safely.
-    const bodyText = await req.text();
+    const key = process.env.SQUARE_WEBHOOK_SIGNATURE_KEY;
+    const notificationUrl = process.env.SQUARE_WEBHOOK_NOTIFICATION_URL;
+    if (!key?.trim() || !notificationUrl?.trim()) {
+      console.error('[Square webhook] Signature configuration missing.');
+      return NextResponse.json({ ok: false, error: 'Webhook verification is not configured' }, { status: 503 });
+    }
+    const rawBody = Buffer.from(await req.arrayBuffer());
+    const signature = req.headers.get('x-square-hmacsha256-signature') || '';
+    const expected = createHmac('sha256', key).update(notificationUrl, 'utf8').update(rawBody).digest();
+    const decoded = /^[A-Za-z0-9+/]{43}=$/.test(signature) ? Buffer.from(signature, 'base64') : Buffer.alloc(0);
+    if (decoded.length !== expected.length || decoded.toString('base64') !== signature || !timingSafeEqual(expected, decoded)) {
+      return NextResponse.json({ ok: false, error: 'Invalid webhook signature' }, { status: 403 });
+    }
+    let bodyText: string;
+    try { bodyText = new TextDecoder('utf-8', {fatal:true}).decode(rawBody); }
+    catch { return NextResponse.json({ ok: false, error: 'Invalid JSON' }, { status: 400 }); }
     let payload: any;
     try {
       payload = JSON.parse(bodyText);
     } catch (e) {
-      console.error('Square webhook: invalid JSON', e);
+      console.error('[Square webhook] Invalid JSON.');
       return NextResponse.json({ ok: false, error: 'Invalid JSON' }, { status: 400 });
     }
 
@@ -67,6 +82,14 @@ export async function POST(req: Request) {
       if (m && m[1]) {
         eventId = m[1];
       }
+    }
+
+    try {
+      const result = await processVerifiedPayment(payment, eventId);
+      if (result !== 'legacy') return NextResponse.json({ok: true, ignored: result === 'ignored'});
+    } catch {
+      console.error('[Square webhook] Verified payment processing incomplete; retry required.');
+      return NextResponse.json({ok: false, error: 'Payment processing temporarily unavailable'}, {status: 503});
     }
 
     if (!eventId) {

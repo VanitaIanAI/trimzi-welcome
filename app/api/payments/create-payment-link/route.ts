@@ -2,20 +2,40 @@
 
 import { NextResponse } from 'next/server';
 import { randomUUID } from 'crypto';
+import { getCalendar, CALENDAR_ID } from '@lib/googleCalendar';
+import { adminDb } from '@lib/firebaseAdmin';
+import { expectedPrice, validPaymentToken, orderRef, paymentHash } from '@lib/squarePayments';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 export async function POST(req: Request) {
   try {
-    const { amount, currency = 'GBP', eventId, serviceName } = await req.json();
-
-    // amount is expected in minor units: e.g. 2200 = £22.00
-    if (!amount || typeof amount !== 'number' || amount <= 0) {
-      return NextResponse.json(
-        { ok: false, error: 'Missing or invalid amount' },
-        { status: 400 }
-      );
+    const body = await req.json();
+    const {eventId} = body;
+    if (typeof eventId !== 'string' || !/^[a-zA-Z0-9_-]{1,1024}$/.test(eventId)) {
+      return NextResponse.json({ok:false,error:'Missing or invalid booking'}, {status:400});
+    }
+    const calendar = await getCalendar();
+    let event;
+    try { event = (await calendar.events.get({calendarId:CALENDAR_ID,eventId})).data; }
+    catch (e: any) {
+      if ([404,410].includes(Number(e?.response?.status || e?.code))) return NextResponse.json({ok:false,error:'Booking is no longer available'}, {status:409});
+      throw e;
+    }
+    if (event.status === 'cancelled') return NextResponse.json({ok:false,error:'Booking is no longer available'}, {status:409});
+    const props = event.extendedProperties?.private || {};
+    const secured = !!props.paymentValidation;
+    let amount = body.amount, currency = body.currency || 'GBP', serviceName = body.serviceName || 'Trimzi booking';
+    if (secured) {
+      if (props.paymentValidation !== 'v1' || !validPaymentToken(body.paymentToken, props.paymentTokenHash)) {
+        return NextResponse.json({ok:false,error:'Payment authorisation is missing or invalid'}, {status:403});
+      }
+      if (props.paymentStatus !== 'unpaid') return NextResponse.json({ok:false,error:'This booking is not awaiting payment'}, {status:409});
+      ({amount,currency,serviceName} = expectedPrice(props));
+    } else if (typeof amount !== 'number' || !Number.isFinite(amount) || amount <= 0) {
+      // Existing bookings retain their original payment-price behaviour.
+      return NextResponse.json({ok:false,error:'Missing or invalid amount'}, {status:400});
     }
 
     const accessToken = process.env.SQUARE_ACCESS_TOKEN;
@@ -35,10 +55,12 @@ export async function POST(req: Request) {
         ? 'https://connect.squareupsandbox.com'
         : 'https://connect.squareup.com';
 
-    const idempotencyKey = randomUUID();
+    // Retries for new bookings reuse the same Square order.
+    const idempotencyKey = secured ? paymentHash(`${CALENDAR_ID}:${eventId}:${props.paymentTokenHash}`) : randomUUID();
 
     const squareRes = await fetch(`${baseUrl}/v2/online-checkout/payment-links`, {
       method: 'POST',
+      signal: AbortSignal.timeout(15000),
       headers: {
         'Content-Type': 'application/json',
         // Keep Square version explicit so behaviour is stable over time
@@ -56,7 +78,7 @@ export async function POST(req: Request) {
           location_id: locationId,
         },
             checkout_options: {
-          redirect_url: `${process.env.APP_BASE_URL}/booking/confirmed?eventId=${eventId ?? ''}`,
+          redirect_url: `${process.env.APP_BASE_URL}/booking/confirmed?eventId=${encodeURIComponent(eventId)}`,
         },
 
         payment_note: eventId ? `Trimzi calendar event: ${eventId}` : undefined,
@@ -65,12 +87,25 @@ export async function POST(req: Request) {
 
     const json = await squareRes.json();
 
-    if (!squareRes.ok || !json?.payment_link?.url) {
-      console.error('Square payment link error:', json);
+    if (!squareRes.ok || !json?.payment_link?.url || (secured && !json?.payment_link?.order_id)) {
+      console.error('[Square payment link] Provider did not return a usable link.');
       return NextResponse.json(
         { ok: false, error: 'Failed to create payment link' },
         { status: 500 }
       );
+    }
+
+    if (secured) {
+      const orderId = json.payment_link.order_id;
+      const ref = orderRef(orderId);
+      await adminDb.runTransaction(async tx => {
+        const existing = await tx.get(ref);
+        const saved = existing.data();
+        if (existing.exists && (saved?.eventId !== eventId || saved?.calendarId !== CALENDAR_ID || saved?.amount !== amount || saved?.currency !== currency || saved?.locationId !== locationId)) {
+          throw new Error('Conflicting payment order binding');
+        }
+        if (!existing.exists) tx.create(ref, {version:'v1',calendarId:CALENDAR_ID,eventId,orderId,amount,currency,locationId,createdAt:new Date().toISOString()});
+      });
     }
 
     return NextResponse.json({
@@ -79,9 +114,9 @@ export async function POST(req: Request) {
       id: json.payment_link.id as string,
     });
   } catch (err: any) {
-    console.error('Square payment link unexpected error:', err);
+    console.error('[Square payment link] Payment link creation incomplete.');
     return NextResponse.json(
-      { ok: false, error: err?.message ?? 'Unexpected error' },
+      { ok: false, error: 'Unable to start online payment; your booking remains confirmed' },
       { status: 500 }
     );
   }
