@@ -1,0 +1,7 @@
+{
+  "functions": [{
+    "source": "functions-reminders",
+    "codebase": "trimzi-reminders",
+    "ignore": ["node_modules", ".git", "tests", "*.log", ".env*", ".secret*", "README.md"]
+  }]
+}

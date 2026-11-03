@@ -1,0 +1,11 @@
+'use strict';
+const {test}=require('node:test'),assert=require('node:assert/strict');
+const {metric,policies}=require('./policies.cjs');
+const channel='projects/trimzi/notificationChannels/synthetic';
+test('reminder alerts stay off until activation; app health is on',()=>{const p=policies(channel);assert.equal(p.length,5);assert.equal(p.filter(p=>p.enabled).length,2);for(const x of p){assert.deepEqual(x.notificationChannels,[channel]);assert.equal(x.conditions.length,1);}});
+test('explicit activation enables reminder monitoring',()=>{assert(policies(channel,{activateReminders:true}).every(p=>p.enabled));});
+test('invalid project channels rejected',()=>{assert.throws(()=>policies('projects/other/notificationChannels/1'));});
+test('healthy heartbeat excludes disabled and failed runs',()=>{assert(metric.filter.includes('jsonPayload.outcome="healthy"'));assert(!metric.metricDescriptor.labels);});
+test('heartbeat handles zero counts and absent series across revisions',()=>{const c=policies(channel).find(p=>p.userLabels.alert_id==='reminder-missing').conditions[0].conditionPrometheusQueryLanguage;assert(c.query.includes('sum(sum_over_time'));assert(c.query.includes('absent_over_time'));assert(c.query.includes('[75m]'));assert(!c.query.includes('revision_name'));});
+test('log alerts rate-limit notifications and never extract customer data',()=>{for(const p of policies(channel).filter(p=>p.conditions[0].conditionMatchedLog)){assert.equal(p.alertStrategy.notificationRateLimit.period,'3600s');assert(!p.conditions[0].conditionMatchedLog.labelExtractors);}});
+test('server error alert aggregates revisions with volume floor',()=>{const c=policies(channel).find(p=>p.userLabels.alert_id==='app-errors').conditions[0].conditionThreshold;assert.equal(c.thresholdValue,2);assert.equal(c.aggregations[0].crossSeriesReducer,'REDUCE_SUM');});

@@ -86,7 +86,10 @@ export async function POST(req: Request) {
       if (!canChangeAppointment(owned.window.startISO, Date.now()) || Date.parse(target.startISO) <= Date.now()) throw changeError('Please refresh the appointment times before continuing.');
       if (!owned.event.etag) throw changeError('We could not verify this appointment. Please try again.', 503);
       await assertOwnership();
+      // Store the schedule action time with the operation; recovery never invents a later move time.
+      const reminderScheduledAt = new Date().toISOString();
       await prepareMove(id, {
+        reminderScheduledAt,
         uid, bookingId, bookingPath: owned.ref.path, eventId: owned.event.id!, date, time, expectedStartISO,
         oldStartISO: owned.window.startISO, oldEndISO: owned.window.endISO,
         newStartISO: target.startISO, newEndISO: target.endISO,
@@ -98,7 +101,13 @@ export async function POST(req: Request) {
         await assertOwnership();
         await owned.calendar.events.patch({
           calendarId: CALENDAR_ID, eventId: owned.event.id!, sendUpdates: 'none',
-          requestBody: {start: {dateTime: target.startISO, timeZone: 'Europe/London'}, end: {dateTime: target.endISO, timeZone: 'Europe/London'}},
+          requestBody: {
+            start: {dateTime: target.startISO, timeZone: 'Europe/London'},
+            end: {dateTime: target.endISO, timeZone: 'Europe/London'},
+            ...(owned.privateData.trimziReminder === 'v1' ? {extendedProperties: {private: {
+              reminderStartISO: target.startISO, reminderScheduledAt, reminderRevision: id,
+            }}} : {}),
+          },
         }, {headers: {'If-Match': owned.event.etag}, timeout: 15_000, retry: false});
       } catch (error) {
         // A precondition/conflict rejection definitely did not move the event.

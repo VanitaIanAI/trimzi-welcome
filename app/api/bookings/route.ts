@@ -175,6 +175,15 @@ const event = {
    extendedProperties: {
     private: {
       ...(bookingOwnerUid ? {bookingOwnerUid, confirmationEmail: attendeeEmail, bookingBarber: barber, bookingService: summary} : {}),
+      // Durable reminder enrolment for guests and registered customers. No extra service call.
+      trimziReminder: 'v1',
+      reminderEmail: attendeeEmail,
+      reminderService: summary,
+      reminderBarber: barber,
+      reminderStartISO: start.toISOString(),
+      reminderEnrolledAt: new Date().toISOString(),
+      reminderScheduledAt: new Date().toISOString(),
+      reminderRevision: randomUUID(),
       customerName: customerName || '',
       customerPhone: customerPhone || '',
       paymentMethod: normalisedPaymentMethod,
