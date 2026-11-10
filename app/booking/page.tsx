@@ -1,5 +1,9 @@
 'use client';
 import { findService } from '@lib/serviceCatalog';
+import WaitlistForm from './WaitlistForm';
+
+const testWaitlist = process.env.NODE_ENV === 'development' && process.env.NEXT_PUBLIC_TRIMZI_TEST_WAITLIST === 'yes';
+const testWaitlistDate = testWaitlist ? process.env.NEXT_PUBLIC_TRIMZI_TEST_WAITLIST_DATE : undefined;
 
 // app/booking/page.tsx
 
@@ -334,6 +338,7 @@ const clearPersistedHold = () => {
 
 // --- Calendar modal state (Wed–Sat only) ---
 const [showCalendarModal, setShowCalendarModal] = useState(false);
+const [waitlistDate, setWaitlistDate] = useState<string | null>(null);
 const [viewMonth, setViewMonth] = useState(() => {
   const d = new Date();
   d.setDate(1);
@@ -526,6 +531,10 @@ useEffect(() => {
   const minISO = isoTodayUK();
   const barberForCalendar = barber ? barber : 'Ian';
   const openDates = buildOpenDatesForMonth(viewMonth, minISO);
+  if (testWaitlistDate) {
+    setDayStatus(Object.fromEntries(openDates.map(iso => [iso, iso === testWaitlistDate ? 'full' : 'open'])));
+    return;
+  }
 
   // mark as loading first
   setDayStatus(prev => {
@@ -923,6 +932,7 @@ async function handleBook(selectedPaymentMethod: 'pay_now' | 'pay_later') {
     d.setDate(1);
     d.setHours(0, 0, 0, 0);
     setViewMonth(d);
+    setWaitlistDate(null);
     setShowCalendarModal(true);
   }}
   className="rounded-md border border-brown/20 bg-white px-3 py-2 text-sm"
@@ -1487,6 +1497,15 @@ async function handleBook(selectedPaymentMethod: 'pay_now' | 'pay_later') {
         {extraOpeningDates.length ? 'Select a day. Extra Christmas opening days are listed below.' : 'Select a day (Wed–Sat only).'} Fully booked days show a 🚫.
       </p>
 
+      {testWaitlist && selectedService && barber && (
+        <p className="mt-2 text-sm text-brown">{testWaitlistDate ? 'Test preview: select the fictional fully booked date.' : 'Select a fully booked day to join its waiting list.'}</p>
+      )}
+      {waitlistDate && selectedService && barber && (
+        <WaitlistForm key={waitlistDate + barber + selectedService.id} date={waitlistDate}
+          serviceId={selectedService.id} serviceName={selectedService.name} barber={barber}
+          onBack={() => setWaitlistDate(null)} />
+      )}
+
       {hasCalendarErrors && !isCalendarLoading && (
         <div className="mt-3 rounded-lg border border-brown/20 p-3 text-sm text-brown" role="status">
           <p>Some dates couldn’t be checked. You can select a date to check its times, or retry.</p>
@@ -1569,15 +1588,21 @@ const renderCalendarDate = (iso: string, label?: string) => {
           const dayNum = Number(iso.slice(8, 10));
           const status = dayStatus[iso];
           const isFull = status === 'full';
+          const canJoinWaitlist = testWaitlist && isFull && Boolean(barber && selectedService);
           const isMaintenance = isOctoberMaintenanceDate(iso, octoberMaintenance);
 
           return (
             <button
               key={iso}
               type="button"
-              disabled={isFull || isMaintenance}
-              aria-label={isMaintenance ? `${dayNum}: temporarily unavailable until noon UK time on 25 October` : status === 'error' ? `${label || dayNum}: availability not checked` : undefined}
+              disabled={(isFull && !canJoinWaitlist) || isMaintenance || Boolean(testWaitlistDate && iso !== testWaitlistDate)}
+              aria-label={isMaintenance ? `${dayNum}: temporarily unavailable until noon UK time on 25 October` : canJoinWaitlist ? dayNum + ': fully booked, join waiting list' : status === 'error' ? `${label || dayNum}: availability not checked` : undefined}
               onClick={() => {
+                if (canJoinWaitlist) {
+                  setWaitlistDate(iso);
+                  return;
+                }
+                setWaitlistDate(null);
                 if (holdId) {
                   try { void fetch(`/api/holds?holdId=${encodeURIComponent(holdId)}`, { method: 'DELETE' }); } catch {}
                 }
@@ -1589,7 +1614,7 @@ const renderCalendarDate = (iso: string, label?: string) => {
               className={`h-12 rounded-xl border text-sm transition flex items-center justify-center gap-1
                 ${selectedDate === iso
                   ? 'bg-brown text-ivory border-brown'
-                  : isFull || isMaintenance
+                  : (isFull && !canJoinWaitlist) || isMaintenance
                     ? 'bg-white border-brown/10 text-brown/30 cursor-not-allowed'
                     : 'bg-white border-brown/20 text-brown hover:border-brown/40'
                 }`}
