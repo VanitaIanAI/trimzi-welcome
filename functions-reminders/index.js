@@ -15,7 +15,7 @@ const sender=defineString('REMINDER_FROM',{default:''});
 const calendarCredentials=defineSecret('REMINDER_GOOGLE_CREDENTIALS');
 const resendKey=defineSecret('RESEND_API_KEY');
 
-exports.appointmentReminders=onSchedule({schedule:'*/30 * * * *',timeZone:'UTC',region:'europe-west2',memory:'512MiB',timeoutSeconds:240,maxInstances:1,concurrency:1,retryCount:0,secrets:[calendarCredentials,resendKey]},async()=>monitorRun(async()=>{
+exports.appointmentReminders=onSchedule({schedule:'*/30 * * * *',timeZone:'UTC',region:'europe-west2',serviceAccount:'trimzi-reminder-worker@trimzi.iam.gserviceaccount.com',memory:'512MiB',timeoutSeconds:240,maxInstances:1,concurrency:1,retryCount:0,secrets:[calendarCredentials,resendKey]},async()=>monitorRun(async()=>{
   if (!enabled.value()) { return {disabled:true}; }
   try {
   if (!calendarId.value() || !sender.value() || !resendKey.value()) throw Error('Reminder configuration missing');
