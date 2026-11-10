@@ -61,7 +61,8 @@ export default function Onboarding() {
   const [showPassword, setShowPassword] = useState(false);
 
   const [showAppNotice, setShowAppNotice] = useState(false);
-  const appNoticeKey = 'appNoticeFestive2026';
+  const [showFestiveHours, setShowFestiveHours] = useState(false);
+  const appNoticeKey = 'appNoticeUpdates2026';
   // Show a blocking overlay across the redirect round-trip
 const [authInProgress, setAuthInProgress] = useState(false);
 
@@ -613,36 +614,67 @@ const handleGuest = async () => {
       aria-labelledby="app-notice-title"
       className="relative w-[92%] max-w-md max-h-[90dvh] overflow-y-auto bg-white rounded-2xl shadow-xl border border-brown/10 p-5"
     >
-      <h2 id="app-notice-title" className="text-brown text-xl font-semibold mb-3">Festive bookings are open ✨</h2>
-      <p className="text-brown/80 text-sm leading-relaxed">
-        It’s almost that time of year! We won’t mention the “C” word just yet—but the diary is open.
-      </p>
+            <h2 id="app-notice-title" className="text-brown text-xl font-semibold mb-3">
+              {showFestiveHours ? 'Festive bookings are open ✨' : 'What’s new in TrimZi'}
+            </h2>
+            {showFestiveHours ? (
+              <>
+          <p className="text-brown/80 text-sm leading-relaxed">
+            It’s almost that time of year! We won’t mention the “C” word just yet—but the diary is open.
+          </p>
 
-      <div className="mt-4 space-y-3 text-sm text-brown/80">
-        <section className="rounded-xl bg-ivory border border-brown/10 p-3">
-          <h3 className="font-semibold text-brown">Extra Monday &amp; Tuesday appointments</h3>
-          <p className="mt-1 font-semibold text-brown">21, 22, 28 &amp; 29 December 2026</p>
-          <p className="mt-1">11 a.m.–6 p.m. · Last appointment starts at <strong>5:15 p.m.</strong></p>
-          <p className="mt-2 text-xs leading-relaxed">Limited availability—book ahead to secure your preferred time.</p>
-        </section>
+          <div className="mt-4 space-y-3 text-sm text-brown/80">
+            <section className="rounded-xl bg-ivory border border-brown/10 p-3">
+              <h3 className="font-semibold text-brown">Extra Monday &amp; Tuesday appointments</h3>
+              <p className="mt-1 font-semibold text-brown">21, 22, 28 &amp; 29 December 2026</p>
+              <p className="mt-1">11 a.m.–6 p.m. · Last appointment starts at <strong>5:15 p.m.</strong></p>
+              <p className="mt-2 text-xs leading-relaxed">Limited availability—book ahead to secure your preferred time.</p>
+            </section>
 
-        <section>
-          <h3 className="font-semibold text-brown">Christmas Eve &amp; New Year’s Eve</h3>
-          <p className="mt-1">Last appointment starts at <strong>1:15 p.m.</strong></p>
-        </section>
+            <section>
+              <h3 className="font-semibold text-brown">Christmas Eve &amp; New Year’s Eve</h3>
+              <p className="mt-1">Last appointment starts at <strong>1:15 p.m.</strong></p>
+            </section>
 
-        <section>
-          <h3 className="font-semibold text-brown">Closed for the holidays</h3>
-          <p className="mt-1">25–26 December 2026<br />1–2 January 2027</p>
-        </section>
-      </div>
+            <section>
+              <h3 className="font-semibold text-brown">Closed for the holidays</h3>
+              <p className="mt-1">25–26 December 2026<br />1–2 January 2027</p>
+            </section>
+          </div>
 
-      <p className="mt-4 text-sm font-medium text-brown">Feel free to book ahead into the New Year!</p>
-      <p className="text-brown/70 text-xs mt-2">
-        Tap anywhere outside this box or “Got it” to continue.
-      </p>
-
-      <div className="mt-5 flex justify-end">
+          <p className="mt-4 text-sm font-medium text-brown">Feel free to book ahead into the New Year!</p>
+              </>
+            ) : (
+              <div className="space-y-4 text-sm text-brown">
+                <section>
+                  <h3 className="font-semibold">Need to change your appointment?</h3>
+                  <p className="mt-1">Sign in and open <strong>Bookings</strong> to rearrange eligible appointments more than 24 hours ahead. If your appointment is within 24 hours, please contact Ian directly.</p>
+                </section>
+                <section>
+                  <h3 className="font-semibold">Get a reminder before your visit</h3>
+                  <p className="mt-1">Book more than 24 hours ahead and we’ll email you a reminder around a day before. If you’re signed in, check that <strong>Email reminders</strong> is on in <strong>Profile</strong>. If you book as a guest, we’ll use the email address you give us.</p>
+                </section>
+                <button
+                  type="button"
+                  className="w-full rounded-xl border border-brown/20 bg-ivory p-3 text-left hover:bg-ivory/80 focus-visible:outline focus-visible:outline-2 focus-visible:outline-brown"
+                  onClick={() => setShowFestiveHours(true)}
+                >
+                  <span className="block font-semibold">🎄 Christmas &amp; New Year hours</span>
+                  <span className="mt-1 block">The festive diary is open, with extra Monday and Tuesday appointments.</span>
+                  <span className="mt-2 block font-semibold">View festive hours →</span>
+                </button>
+              </div>
+            )}
+            <div className="mt-5 flex justify-end gap-3">
+              {showFestiveHours && (
+                <button
+                  type="button"
+                  className="h-11 rounded-xl px-4 text-brown hover:bg-ivory/80"
+                  onClick={() => setShowFestiveHours(false)}
+                >
+                  Back
+                </button>
+              )}
         <button
           type="button"
           className="h-11 rounded-xl px-4 border border-brown/20 text-brown hover:bg-ivory/80"
@@ -651,7 +683,7 @@ const handleGuest = async () => {
             setShowAppNotice(false);
           }}
         >
-          Got it
+          Continue
         </button>
       </div>
     </div>
